@@ -58,6 +58,16 @@ enum class LabelsIds
 
 };
 
+void Error()
+{
+
+  tft.setTextSize(4);
+  tft.setTextColor(TFT_RED, TFT_WHITE);
+  tft.drawString("ERROR!", 50, 128);
+  while (1)
+    ;
+}
+
 bool InitSDCard()
 {
   int count = 0;
@@ -227,9 +237,10 @@ void DisplayIndicator(String string, int x, int y, uint16_t color)
   tft.print(string);
 }
 
-void DisplayStock(StockData stockData)
+void DisplayStockData(StockData stockData)
 {
   char buf[32];
+  const int indent = 10;
 
   tft.setTextFont(0);
   //tft.setFreeFont(&FreeMono9pt7b);
@@ -238,13 +249,49 @@ void DisplayStock(StockData stockData)
   tft.drawRect(0, 0, tft.width(), tft.height(), TFT_WHITE);
   tft.drawFastHLine(0, 40, tft.width(), TFT_WHITE);
   tft.drawFastHLine(0, 200, tft.width(), TFT_WHITE);
+  tft.drawFastVLine(105, 0, 40, TFT_WHITE);
 
-  // Symbol text.
+  // Symbol.
   tft.setTextSize(3);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.drawString(stockData.symbol, 10, 10);
+  String spaced;
+  if (stockData.symbol.length() == 1)
+    spaced = "  " + stockData.symbol + "  ";
+  else if (stockData.symbol.length() == 2)
+    spaced = " " + stockData.symbol + "  ";
+  else if (stockData.symbol.length() == 3)
+    spaced = " " + stockData.symbol + " ";
+  else if (stockData.symbol.length() == 4)
+    spaced = "" + stockData.symbol + " ";
+  else
+    spaced = stockData.symbol;
+  tft.drawString(spaced, indent, 10);
+
+  // Name.
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextSize(2);
-  tft.drawString(stockData.companyName, 70, 15);
+
+  String name = stockData.companyName;
+  if (stockData.companyName.length() > 15)
+  {
+   // name = stockData.companyName.substring(0, 9);
+     tft.drawString(stockData.companyName.substring(0, 14), indent + 110, 15);
+       tft.drawPixel(300, 25, TFT_WHITE);
+    tft.drawPixel(303, 25, TFT_WHITE);
+      tft.drawPixel(306, 25, TFT_WHITE);
+  }
+  else
+  {
+  tft.drawString(stockData.companyName, indent + 110, 15);
+  }
+
+
+
+
+
+
+
+
 
   // Price data.
   tft.setTextSize(6);
@@ -350,7 +397,6 @@ void setup()
   ledcAttachPin(PIN_LCD_BACKLIGHT_PWM, 0);
   ledcWrite(0, 255);
 
-
   InitSDCard();
 
   GetParametersFromSDCard();
@@ -358,11 +404,10 @@ void setup()
 
 void loop()
 {
-  delay(100);
 
   CheckTouchScreen();
 
   StockData stockData;
   GetStockData(symbols.at(symbolSelect), &stockData);
-  DisplayStock(stockData);
+  DisplayStockData(stockData);
 }
