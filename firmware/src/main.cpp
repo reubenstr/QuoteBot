@@ -1,15 +1,17 @@
-// Animates white pixels to simulate flying through a star field
+
 
 #include <Arduino.h>
 #include <SPI.h>
 #include <TFT_eSPI.h>
+#include <SD.h>
+#include <ArduinoJson.h>
 
 #include <gfxItems.h>
 
-#include <list>
 #include <vector>
 
-#define LCD_BACKLIGHT_PWM 21
+#define PIN_LCD_BACKLIGHT_PWM 21
+#define PIN_SD_CHIP_SELECT 15
 
 // Use hardware SPI
 TFT_eSPI tft = TFT_eSPI();
@@ -18,10 +20,21 @@ GFXItems gfxItems(&tft);
 
 const int groupId = 0;
 
+// WiFi
+
+struct WifiCredentials
+{
+  String ssid;
+  String password;
+};
+
+const char *parametersFilePath = "/parameters.json";
+std::vector<WifiCredentials> wifiCredentials;
+
 unsigned int symbolSelect = 0;
 unsigned int maxSymbols = 10;
 
-std::vector<String> symbolList;
+std::vector<String> symbols;
 
 struct StockData
 {
@@ -44,6 +57,94 @@ enum class LabelsIds
   Clock
 
 };
+
+bool InitSDCard()
+{
+  int count = 0;
+
+  Serial.println("SD Card: Attempting to mount SD card...");
+
+  while (!SD.begin(PIN_SD_CHIP_SELECT))
+  {
+    if (++count > 5)
+    {
+      Serial.println("SD Card: Card Mount Failed.");
+      return false;
+    }
+    delay(250);
+  }
+
+  Serial.println("SD Card: SD card mounted.");
+  return true;
+}
+
+bool GetParametersFromSDCard()
+{
+  File file = SD.open(parametersFilePath);
+
+  Serial.printf("SD Card: Attempting to fetch parameters from %s...\n", parametersFilePath);
+
+  if (!file)
+  {
+    Serial.printf("SD Card: Failed to open file: %s\n", parametersFilePath);
+    file.close();
+    return false;
+  }
+
+  DynamicJsonDocument doc(2048);
+  DeserializationError error = deserializeJson(doc, file.readString());
+
+  if (error)
+  {
+    Serial.print(F("DeserializeJson() failed: "));
+    Serial.println(error.c_str());
+    return false;
+  }
+
+  // TODO: check for valid parameters.json file.
+  // Check if expected parameters exist, if not alert user, and provide default file example.
+  int numSymbols = doc["symbols"].size();
+
+  for (int i = 0; i < numSymbols; i++)
+  {
+    symbols.push_back(doc["symbols"][i].as<String>());
+  }
+
+  int numWifi = doc["wifiCredentials"].size();
+
+  for (int i = 0; i < numWifi; i++)
+  {
+
+    WifiCredentials wC;
+
+    wC.ssid = doc["wifiCredentials"][i]["ssid"].as<String>();
+    wC.password = doc["wifiCredentials"][i]["password"].as<String>();
+    wifiCredentials.push_back(wC);
+
+    Serial.println(wifiCredentials[i].ssid);
+    Serial.println(wifiCredentials[i].password);
+  }
+  /*
+  timeZone = doc["timeZone"].as<String>();
+
+  int indicatorBrightnessParameter = doc["indicatorBrightness"].as<int>();
+  int signBrightnessParameter = doc["signBrightness"].as<int>();
+
+
+  if (indicatorBrightnessParameter > 9 && indicatorBrightnessParameter < 256)
+  {
+    indicatorBrightness = indicatorBrightnessParameter;
+  }
+
+  if (signBrightnessParameter > 25 && signBrightnessParameter < 256)
+  {
+    signBrightness = signBrightnessParameter;
+  }
+  */
+
+  file.close();
+  return true;
+}
 
 float mapFloat(float x, float in_min, float in_max, float out_min, float out_max)
 {
@@ -156,13 +257,12 @@ void DisplayStock(StockData stockData)
   sprintf(buf, "%1.2f", stockData.change);
   tft.drawString(buf, 40, 120);
 
- 
   if (stockData.changePercent < 10)
     sprintf(buf, "%1.2f%%", stockData.changePercent);
   else if (stockData.changePercent < 100)
     sprintf(buf, "%2.1f%%", stockData.changePercent);
   else
-   sprintf(buf, "%3.0f%%", stockData.changePercent);
+    sprintf(buf, "%3.0f%%", stockData.changePercent);
 
   tft.drawString(buf, 175, 120);
 
@@ -212,7 +312,7 @@ void CheckTouchScreen()
       touchDebounceMillis = millis();
 
       symbolSelect++;
-      if (symbolSelect > symbolList.size() - 1)
+      if (symbolSelect > symbols.size() - 1)
       {
         symbolSelect = 0;
       }
@@ -247,13 +347,13 @@ void setup()
   DisplayIndicator("12:23:12", 205, textStatusY, 1 ? TFT_GREEN : TFT_RED);
 
   ledcSetup(0, 5000, 8);
-  ledcAttachPin(LCD_BACKLIGHT_PWM, 0);
+  ledcAttachPin(PIN_LCD_BACKLIGHT_PWM, 0);
   ledcWrite(0, 255);
 
-  symbolList.push_back("AG");
-  symbolList.push_back("AXU");
-  symbolList.push_back("SAND");
-  symbolList.push_back("GDXJ");
+
+  InitSDCard();
+
+  GetParametersFromSDCard();
 }
 
 void loop()
@@ -263,6 +363,6 @@ void loop()
   CheckTouchScreen();
 
   StockData stockData;
-  GetStockData(symbolList.at(symbolSelect), &stockData);
+  GetStockData(symbols.at(symbolSelect), &stockData);
   DisplayStock(stockData);
 }
