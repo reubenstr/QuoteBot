@@ -5,9 +5,6 @@
 #include <TFT_eSPI.h>
 #include <SD.h>
 #include <ArduinoJson.h>
-
-#include <gfxItems.h>
-
 #include <vector>
 
 #define PIN_LCD_BACKLIGHT_PWM 21
@@ -15,10 +12,6 @@
 
 // Use hardware SPI
 TFT_eSPI tft = TFT_eSPI();
-
-GFXItems gfxItems(&tft);
-
-const int groupId = 0;
 
 // WiFi
 
@@ -29,14 +22,9 @@ struct WifiCredentials
 };
 
 const char *parametersFilePath = "/parameters.json";
-std::vector<WifiCredentials> wifiCredentials;
-
 unsigned int symbolSelect = 0;
-unsigned int maxSymbols = 10;
 
-std::vector<String> symbols;
-
-struct StockData
+struct SymbolData
 {
   String symbol;
   String companyName;
@@ -47,7 +35,24 @@ struct StockData
   float peRatio;
   float week52High;
   float week52Low;
+  unsigned long lastUpdate;
 };
+
+
+struct Parameters
+{
+  std::vector<SymbolData> symbolData;
+  std::vector<WifiCredentials> wifiCredentials;
+  String apiProvider;
+  String apiKey;
+  String timeZone;
+  int apiMaxRequestsPerMinute;
+  int nextSymbolDelay;
+  int brightnessMax;
+  int brightnessMin;
+  int dimStartHour;
+  int dimEndHour;
+} parameters;
 
 enum class LabelsIds
 {
@@ -58,12 +63,50 @@ enum class LabelsIds
 
 };
 
-void Error()
+struct Status
 {
+  bool wifi;
+  bool sd;
+  bool api;
+  bool time;
+  bool symbolLocked;
 
+  bool operator!=(Status const &s)
+  {
+    return (wifi != s.wifi ||
+            sd != s.sd ||
+            api != s.api ||
+            time != s.time ||
+            symbolLocked != s.symbolLocked);
+  }
+
+} status;
+
+enum class ErrorIDs
+{
+  SdFailed,
+  ParametersFailed
+};
+
+void Error(ErrorIDs errorId)
+{
   tft.setTextSize(4);
-  tft.setTextColor(TFT_RED, TFT_WHITE);
-  tft.drawString("ERROR!", 50, 128);
+  tft.setTextColor(TFT_RED, TFT_BLACK);
+  tft.drawString("ERROR!", 30, 20);
+
+  if (errorId == ErrorIDs::SdFailed)
+  {
+    tft.drawString("SD Card", 30, 90);
+    tft.drawString("not found.", 30, 130);
+  }
+
+  if (errorId == ErrorIDs::ParametersFailed)
+  {
+    tft.drawString("SD Card", 30, 90);
+    tft.drawString("parameters", 30, 130);
+    tft.drawString("are invalid.", 30, 170);
+  }
+
   while (1)
     ;
 }
@@ -117,23 +160,29 @@ bool GetParametersFromSDCard()
 
   for (int i = 0; i < numSymbols; i++)
   {
-    symbols.push_back(doc["symbols"][i].as<String>());
+    SymbolData sData;
+    sData.symbol = doc["symbols"][i].as<String>();
+    parameters.symbolData.push_back(sData);
   }
 
   int numWifi = doc["wifiCredentials"].size();
 
   for (int i = 0; i < numWifi; i++)
   {
-
     WifiCredentials wC;
-
     wC.ssid = doc["wifiCredentials"][i]["ssid"].as<String>();
     wC.password = doc["wifiCredentials"][i]["password"].as<String>();
-    wifiCredentials.push_back(wC);
-
-    Serial.println(wifiCredentials[i].ssid);
-    Serial.println(wifiCredentials[i].password);
+    parameters.wifiCredentials.push_back(wC);
   }
+
+  parameters.apiMaxRequestsPerMinute = doc["apiMaxRequestsPerMinute"].as<int>();
+
+  parameters.nextSymbolDelay = doc["nextSymbolDelay"].as<int>();
+  if (parameters.nextSymbolDelay < 1)
+  {
+    parameters.nextSymbolDelay = 1;
+  }
+
   /*
   timeZone = doc["timeZone"].as<String>();
 
@@ -237,7 +286,23 @@ void DisplayIndicator(String string, int x, int y, uint16_t color)
   tft.print(string);
 }
 
-void DisplayStockData(StockData stockData)
+void UpdateIndicators()
+{
+  static Status previousStatus;
+  if (previousStatus != status)
+  {
+    previousStatus = status;
+
+    int y = 217;
+    DisplayIndicator("SD", 10, y, status.sd ? TFT_GREEN : TFT_RED);
+    DisplayIndicator("WIFI", 45, y, status.wifi ? TFT_GREEN : TFT_RED);
+    DisplayIndicator("API", 110, y, status.api ? TFT_GREEN : TFT_RED);
+    DisplayIndicator("L", 170, y, status.symbolLocked ? TFT_BLUE : TFT_BLACK);
+    DisplayIndicator("12:23:12", 215, y, status.time ? TFT_GREEN : TFT_RED);
+  }
+}
+
+void DisplayStockData(SymbolData stockData)
 {
   char buf[32];
   const int indent = 10;
@@ -247,9 +312,9 @@ void DisplayStockData(StockData stockData)
 
   // Frame.
   tft.drawRect(0, 0, tft.width(), tft.height(), TFT_WHITE);
-  tft.drawFastHLine(0, 40, tft.width(), TFT_WHITE);
-  tft.drawFastHLine(0, 200, tft.width(), TFT_WHITE);
-  tft.drawFastVLine(105, 0, 40, TFT_WHITE);
+  tft.drawFastHLine(0, 35, tft.width(), TFT_WHITE);
+  tft.drawFastHLine(0, 205, tft.width(), TFT_WHITE);
+  tft.drawFastVLine(105, 0, 35, TFT_WHITE);
 
   // Symbol.
   tft.setTextSize(3);
@@ -265,7 +330,7 @@ void DisplayStockData(StockData stockData)
     spaced = "" + stockData.symbol + " ";
   else
     spaced = stockData.symbol;
-  tft.drawString(spaced, indent, 10);
+  tft.drawString(spaced, indent, 7);
 
   // Name.
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
@@ -274,79 +339,83 @@ void DisplayStockData(StockData stockData)
   String name = stockData.companyName;
   if (stockData.companyName.length() > 15)
   {
-   // name = stockData.companyName.substring(0, 9);
-     tft.drawString(stockData.companyName.substring(0, 14), indent + 110, 15);
-       tft.drawPixel(300, 25, TFT_WHITE);
+    // name = stockData.companyName.substring(0, 9);
+    tft.drawString(stockData.companyName.substring(0, 14), indent + 110, 12);
+    tft.drawPixel(300, 25, TFT_WHITE);
     tft.drawPixel(303, 25, TFT_WHITE);
-      tft.drawPixel(306, 25, TFT_WHITE);
+    tft.drawPixel(306, 25, TFT_WHITE);
   }
   else
   {
-  tft.drawString(stockData.companyName, indent + 110, 15);
+    tft.drawString(stockData.companyName, indent + 110, 12);
   }
 
-
-
-
-
-
-
-
-
-  // Price data.
+  // Price.
   tft.setTextSize(6);
   tft.setTextColor(TFT_GREEN, TFT_BLACK);
-  //sprintf(buf, "%.2f", stockData.currentPrice);
-  sprintf(buf, "%i", symbolSelect);
+  sprintf(buf, "   %i   ", stockData.currentPrice);
   int tw = tft.textWidth(String(buf));
-  tft.drawString(buf, tft.height() / 2 - tw / 2, 60);
+  tft.drawString(buf, tft.height() / 2 - tw / 2, 50);
+
+  // Change.
   tft.setTextSize(3);
   sprintf(buf, "%1.2f", stockData.change);
-  tft.drawString(buf, 40, 120);
+  tft.drawString(buf, 40, 110);
 
+  // Percent change.
   if (stockData.changePercent < 10)
     sprintf(buf, "%1.2f%%", stockData.changePercent);
   else if (stockData.changePercent < 100)
     sprintf(buf, "%2.1f%%", stockData.changePercent);
   else
     sprintf(buf, "%3.0f%%", stockData.changePercent);
-
-  tft.drawString(buf, 175, 120);
+  tft.drawString(buf, 175, 110);
 
   // Extra data.
   tft.setTextSize(2);
   tft.setTextColor(TFT_BLUE, TFT_BLACK);
-  sprintf(buf, "Open: %3.2f", stockData.openPrice);
-  tft.drawString(buf, 10, 175);
-  sprintf(buf, "P/E: %3.2f", stockData.peRatio);
-  tft.drawString(buf, 185, 175);
+  //sprintf(buf, "Open: %3.2f", stockData.openPrice);
+  //tft.drawString(buf, 10, 175);
+  sprintf(buf, "%3.2f", stockData.openPrice);
+  tft.drawString("Open", 10, 160);
+  tft.drawString(buf, 10, 182);
+
+  sprintf(buf, "%3.2f", stockData.peRatio);
+  tft.drawString("P/E", 120, 160);
+  tft.drawString(buf, 120, 182);
+
+  sprintf(buf, "%3.2f", stockData.lastUpdate);
+  tft.drawString("Update", 220, 160);
+  tft.drawString("12:01:35", 220, 182);
 
   // 52 week
-  int y = 155;
+  int y = 143;
   int x = mapFloat(stockData.currentPrice, stockData.week52Low, stockData.week52High, 20, tft.height() - 20);
-  tft.drawLine(20, y + 5, tft.height() - 20, y + 5, TFT_RED);
-  tft.fillRect(x, y, 5, 10, TFT_RED);
+  tft.drawLine(20, y + 5, tft.height() - 20, y + 5, TFT_YELLOW);
+  tft.fillRect(x, y, 5, 10, TFT_YELLOW);
 }
 
-bool GetStockData(String symbol, StockData *stockData)
+bool GetSymbolData(SymbolData *stockData)
 {
 
-  stockData->symbol = symbol;
+  Serial.printf("API: Requesting data for symbol: %s\n", stockData->symbol.c_str());
+
   stockData->companyName = "First Magestic Silver Co.";
   stockData->openPrice = 16.365;
-  stockData->currentPrice = 16.45;
+  stockData->currentPrice = 9.24 * symbolSelect;
   stockData->change = 12.34;
   stockData->changePercent = 12.34;
   stockData->peRatio = -68.08;
   stockData->week52High = 24.01;
   stockData->week52Low = 4.17;
+  stockData->lastUpdate = 24135179;
 
   return true;
 }
 
+// Touch screen requires calibation, orientation may be inversed.
 void CheckTouchScreen()
 {
-
   //static takeTouchReadings = true;
   static unsigned long touchDebounceDelay = 250;
   static unsigned long touchDebounceMillis = millis();
@@ -354,14 +423,32 @@ void CheckTouchScreen()
 
   if (millis() - touchDebounceMillis > touchDebounceDelay)
   {
-    if (tft.getTouch(&x, &y, 20))
+    if (tft.getTouch(&x, &y, 40))
     {
       touchDebounceMillis = millis();
 
-      symbolSelect++;
-      if (symbolSelect > symbols.size() - 1)
+      if (x < tft.width() / 3)
       {
-        symbolSelect = 0;
+        symbolSelect++;
+        if (symbolSelect > parameters.symbolData.size() - 1)
+        {
+          symbolSelect = 0;
+        }
+      }
+      else if (x > (tft.width() / 3) * 2)
+      {
+        if (symbolSelect != 0)
+        {
+          symbolSelect--;
+        }
+        else
+        {
+          symbolSelect = parameters.symbolData.size() - 1;
+        }
+      }
+      else
+      {
+        status.symbolLocked = !status.symbolLocked;
       }
     }
   }
@@ -371,43 +458,63 @@ void setup()
 {
 
   Serial.begin(115200);
+
   tft.init();
   delay(50);
   tft.setRotation(3);
   delay(50);
   tft.fillScreen(TFT_BLACK);
 
-  int y = 210;
-
-  //gfxItems.Add(GFXItem(int(LabelsIds::Wifi), groupId, "WiFi", 2, 10, y, 50, 20, TFT_BLACK, TFT_GREEN, Justification::Center));
-  //gfxItems.Add(GFXItem(int(LabelsIds::SD), groupId, "SD", 2, 70, y, 40, 20, TFT_BLACK, TFT_GREEN, Justification::Center));
-  //gfxItems.Add(GFXItem(int(LabelsIds::Api), groupId, "API", 2, 120, y, 50, 20, TFT_BLACK, TFT_GREEN, Justification::Center));
-  //gfxItems.Add(GFXItem(int(LabelsIds::Clock), groupId, "12:23:12", 2, 205, y, 100, 20, TFT_BLACK, TFT_GREEN, Justification::Center));
-
-  //gfxItems.DisplayGroup(groupId);
-
-  int textStatusY = y;
-
-  DisplayIndicator("SD", 10, textStatusY, 1 ? TFT_GREEN : TFT_RED);
-  DisplayIndicator("WIFI", 55, textStatusY, 0 ? TFT_GREEN : TFT_RED);
-  DisplayIndicator("API", 130, textStatusY, 0 ? TFT_GREEN : TFT_RED);
-  DisplayIndicator("12:23:12", 205, textStatusY, 1 ? TFT_GREEN : TFT_RED);
-
   ledcSetup(0, 5000, 8);
   ledcAttachPin(PIN_LCD_BACKLIGHT_PWM, 0);
   ledcWrite(0, 255);
 
-  InitSDCard();
+  if (!InitSDCard())
+  {
+    Error(ErrorIDs::SdFailed);
+  }
 
-  GetParametersFromSDCard();
+  if (!GetParametersFromSDCard())
+  {
+    Error(ErrorIDs::ParametersFailed);
+  }
 }
 
 void loop()
 {
+  static unsigned long startSymbolSelect = millis();
+  static unsigned long startDataRequest = millis();
 
   CheckTouchScreen();
 
-  StockData stockData;
-  GetStockData(symbols.at(symbolSelect), &stockData);
-  DisplayStockData(stockData);
+  UpdateIndicators();
+
+  // Increment selected symbol.
+  if (millis() - startSymbolSelect > parameters.nextSymbolDelay * 1000)
+  {
+    startSymbolSelect = millis();
+    if (!status.symbolLocked)
+    {
+      if (++symbolSelect > parameters.symbolData.size() - 1)
+      {
+        symbolSelect = 0;
+      }
+    }
+  }
+
+  // Update symbol data.
+  if (millis() - startDataRequest > (60 / parameters.apiMaxRequestsPerMinute) * 1000)
+  {
+    startDataRequest = millis();
+ 
+    status.api = GetSymbolData(&parameters.symbolData[symbolSelect]);   
+  }
+
+  // Update display with symbol data.
+  static unsigned int previousSymbolSelect;
+  if (previousSymbolSelect != symbolSelect)
+  {
+    previousSymbolSelect = symbolSelect;
+    DisplayStockData(parameters.symbolData.at(symbolSelect));
+  }
 }
