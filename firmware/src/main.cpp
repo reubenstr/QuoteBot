@@ -1,4 +1,9 @@
+/*
 
+
+
+
+*/
 
 #include <Arduino.h>
 #include <SPI.h>
@@ -7,6 +12,7 @@
 #include <vector>
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include "time.h"
 
 #define ARDUINOJSON_USE_LONG_LONG 1
 #include <ArduinoJson.h>
@@ -18,6 +24,12 @@
 TFT_eSPI tft = TFT_eSPI();
 
 const float peRatioNA = 0.0;
+
+// Time.
+struct tm timeinfo;
+const char *ntpServer = "pool.ntp.org";
+const long gmtOffset_sec = -5 * 60 * 60;
+const int daylightOffset_sec = 3600;
 
 // WiFi
 
@@ -123,19 +135,19 @@ bool InitSDCard()
 {
   int count = 0;
 
-  Serial.println("SD Card: Attempting to mount SD card...");
+  Serial.println("SD: Attempting to mount SD card...");
 
   while (!SD.begin(PIN_SD_CHIP_SELECT))
   {
     if (++count > 5)
     {
-      Serial.println("SD Card: Card Mount Failed.");
+      Serial.println("SD: Card Mount Failed.");
       return false;
     }
     delay(250);
   }
 
-  Serial.println("SD Card: SD card mounted.");
+  Serial.println("SD: SD card mounted.");
   return true;
 }
 
@@ -143,11 +155,11 @@ bool GetParametersFromSDCard()
 {
   File file = SD.open(parametersFilePath);
 
-  Serial.printf("SD Card: Attempting to fetch parameters from %s...\n", parametersFilePath);
+  Serial.printf("SD: Attempting to fetch parameters from %s...\n", parametersFilePath);
 
   if (!file)
   {
-    Serial.printf("SD Card: Failed to open file: %s\n", parametersFilePath);
+    Serial.printf("SD: Failed to open file: %s\n", parametersFilePath);
     file.close();
     return false;
   }
@@ -282,20 +294,21 @@ void DisplayIndicator(String string, int x, int y, uint16_t color)
   tft.print(string);
 }
 
-void UpdateIndicators()
+void UpdateIndicators(bool forceUpdate = false)
 {
   static Status previousStatus;
-  if (previousStatus != status)
+  if (previousStatus != status || forceUpdate)
   {
     previousStatus = status;
 
+    String timeString = String(timeinfo.tm_hour) + ":" + String(timeinfo.tm_min) + ":" + String(timeinfo.tm_sec);
     int y = 217;
     DisplayIndicator("SD", 10, y, status.sd ? TFT_GREEN : TFT_RED);
     DisplayIndicator("WIFI", 45, y, status.wifi ? TFT_GREEN : TFT_RED);
-    DisplayIndicator("API", 110, y, status.api ? TFT_GREEN : TFT_RED);
-    DisplayIndicator("L", 150, y, status.symbolLocked ? TFT_BLUE : TFT_BLACK);
-    DisplayIndicator("R", 180, y, status.symbolLocked ? TFT_BLUE : TFT_BLACK);
-    DisplayIndicator("12:23:12", 215, y, status.time ? TFT_GREEN : TFT_RED);
+    DisplayIndicator("API", 100, y, status.api ? TFT_GREEN : TFT_RED);
+    DisplayIndicator("L", 155, y, status.symbolLocked ? TFT_BLUE : TFT_BLACK);
+    DisplayIndicator("R", 190, y, status.requestInProgess ? TFT_BLUE : TFT_BLACK);
+    DisplayIndicator(timeString, 215, y, status.time ? TFT_GREEN : TFT_RED);
   }
 }
 
@@ -498,7 +511,7 @@ bool GetSymbolData(SymbolData *symbolData)
 {
 
   status.requestInProgess = true;
-  UpdateIndicators();
+  //UpdateIndicators();
 
   Serial.printf("API: Requesting data for symbol: %s\n", symbolData->symbol.c_str());
 
@@ -516,6 +529,7 @@ bool GetSymbolData(SymbolData *symbolData)
   stockData->lastUpdate = 24135179;
   */
   status.requestInProgess = false;
+  //UpdateIndicators();
 
   return flag;
 }
@@ -605,6 +619,32 @@ bool ConnectWifi()
   }
 }
 
+bool GetTime()
+{
+
+  if (!getLocalTime(&timeinfo))
+  {
+    Serial.println("TIME: Failed to obtain time");
+    return false;
+  }
+
+  UpdateIndicators(true);
+
+  return true;
+}
+
+// TEMP, MOVE INTO GetSymbolData();
+void ApiCall(void *SymbolData)
+{
+
+  if (WiFi.status() != WL_CONNECTED)
+  {
+  }
+
+  status.api = GetSymbolData(&parameters.symbolData[symbolSelect]);
+  vTaskDelete(NULL);
+}
+
 void setup()
 {
 
@@ -614,13 +654,16 @@ void setup()
   delay(50);
   tft.setRotation(3);
   delay(50);
-  tft.fillScreen(TFT_BLACK);
 
   ledcSetup(0, 5000, 8);
   ledcAttachPin(PIN_LCD_BACKLIGHT_PWM, 0);
   ledcWrite(0, 255);
 
-  if (!InitSDCard())
+  if (InitSDCard())
+  {
+    status.sd = true;
+  }
+  else 
   {
     Error(ErrorIDs::SdFailed);
   }
@@ -630,19 +673,17 @@ void setup()
     Error(ErrorIDs::ParametersFailed);
   }
 
-  if (ConnectWifi())
-  {
-  }
-  else
-  {
-    Serial.println("WiFi not connected.");
-  }
+  ConnectWifi();
+
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
 }
 
 void loop()
 {
   static unsigned long startSymbolSelect = millis();
   static unsigned long startDataRequest = millis();
+
+  status.wifi = WiFi.status() == WL_CONNECTED;
 
   CheckTouchScreen();
 
@@ -661,7 +702,17 @@ void loop()
     }
 
     // TEMP: figure out how to handle requests and track the timing.
-    status.api = GetSymbolData(&parameters.symbolData[symbolSelect]);
+    //status.api = GetSymbolData(&parameters.symbolData[symbolSelect]);
+
+    /*   */
+    xTaskCreate(
+        ApiCall,   // Function that should be called
+        "ApiCall", // Name of the task (for debugging)
+        8192,      // Stack size (bytes)
+        NULL,      // Parameter to pass
+        1,         // Task priority
+        NULL       // Task handle
+    );
   }
 
   // Update display with symbol data.
@@ -678,5 +729,12 @@ void loop()
     startDataRequest = millis();
 
     //status.api = GetSymbolData(&parameters.symbolData[symbolSelect]);
+  }
+
+  static unsigned long startGetTime = millis();
+  if (millis() - startGetTime > 750)
+  {
+    startGetTime = millis();
+    status.time = GetTime();
   }
 }
