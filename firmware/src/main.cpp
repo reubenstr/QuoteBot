@@ -311,6 +311,7 @@ void DisplayStockData(SymbolData symbolData)
   const int indent = 10;
 
   tft.setTextFont(0);
+  tft.setTextDatum(MC_DATUM);
   //tft.setFreeFont(&FreeMono9pt7b);
 
   // Frame.
@@ -366,7 +367,14 @@ void DisplayStockData(SymbolData symbolData)
   // Change.
   tft.setTextSize(3);
   sprintf(buf, "%1.2f", symbolData.change);
+
+
+
   tft.drawString(buf, 40, 110);
+
+
+
+
 
   // Percent change.
   if (symbolData.changePercent < 10)
@@ -416,7 +424,10 @@ void DisplayStockData(SymbolData symbolData)
 bool GetSymbolDataFromAPI(SymbolData *symbolData)
 {
   String payload;
-  String host = "https://cloud.iexapis.com/stable/stock/" + symbolData->symbol + "/quote?token=" + parameters.apiKey;
+  //String host = "https://cloud.iexapis.com/stable/stock/" + symbolData->symbol + "/quote?token=" + parameters.apiKey;
+
+  // TEMP SANDBOX
+  String host = "https://sandbox.iexapis.com/stable/stock/" + symbolData->symbol + "/quote?token=Tpk_81853d40d7084179b6e722e84f44e148";
 
   Serial.print("API: Connecting to ");
   Serial.println(host);
@@ -505,31 +516,43 @@ bool GetSymbolDataFromAPI(SymbolData *symbolData)
   return true;
 }
 
-bool GetSymbolData(SymbolData *symbolData)
+void GetSymbolData(void *)
 {
+  static unsigned long start = millis();
 
-  status.requestInProgess = true;
-  //UpdateIndicators();
+  while (1)
+  {
+    if (millis() - start > 2000)
+    {
+      start = millis();
+      status.requestInProgess = true;
 
-  Serial.printf("API: Requesting data for symbol: %s\n", symbolData->symbol.c_str());
+      // Get index symbol with oldest data.
+      int selectedIndex = 0;    
+      for (int i = 0; i < parameters.symbolData.size(); i++)
+      {
+          if (parameters.symbolData[i].lastUpdate > parameters.symbolData[selectedIndex].lastUpdate)
+          {
+            selectedIndex = i;
+          }
+      }
 
-  bool flag = GetSymbolDataFromAPI(symbolData);
+      Serial.printf("API: Requesting data for symbol: %s\n", parameters.symbolData[selectedIndex].symbol.c_str()); 
+      
+      if (parameters.apiProvider.equalsIgnoreCase("IEXCLOUD"))
+      {
+          status.api = GetSymbolDataFromAPI(&parameters.symbolData[selectedIndex]);
+      }
+      else
+      {
+        status.api = false;
+      } 
+      
+      status.requestInProgess = false;
+    }
+  }
 
-  /*
-  stockData->companyName = "First Magestic Silver Co.";
-  stockData->openPrice = 16.365;
-  stockData->currentPrice = 9.24 * symbolSelect;
-  stockData->change = 12.34;
-  stockData->changePercent = 12.34;
-  stockData->peRatio = -68.08;
-  stockData->week52High = 24.01;
-  stockData->week52Low = 4.17;
-  stockData->lastUpdate = 24135179;
-  */
-  status.requestInProgess = false;
-  //UpdateIndicators();
-
-  return flag;
+  vTaskDelete(NULL); // This will not occur, but kept in for awareness.
 }
 
 // Touch screen requires calibation, orientation may be inversed.
@@ -602,7 +625,7 @@ bool ConnectWifi()
       {
         tft.fillScreen(TFT_BLACK);
         Serial.println("");
-        Serial.printf("WIFI: WiFi connected to %s\n", WiFi.localIP().toString().c_str());
+        Serial.printf("WIFI: WiFi connected to %s, device IP: %s\n", parameters.wifiCredentials[wifiCredentialsIndex].ssid.c_str(), WiFi.localIP().toString().c_str());
         return true;
       }
     }
@@ -629,18 +652,6 @@ bool GetTime()
   UpdateIndicators(true);
 
   return true;
-}
-
-// TEMP, MOVE INTO GetSymbolData();
-void ApiCall(void *SymbolData)
-{
-
-  if (WiFi.status() != WL_CONNECTED)
-  {
-  }
-
-  status.api = GetSymbolData(&parameters.symbolData[symbolSelect]);
-  vTaskDelete(NULL);
 }
 
 void setup()
@@ -683,6 +694,16 @@ void setup()
   {
     n.currentPrice = pow(10, random(1, 5));
   }
+
+
+  xTaskCreate(
+      GetSymbolData,   // Function that should be called
+      "GetSymbolData", // Name of the task (for debugging)
+      8192,            // Stack size (bytes)
+      NULL,            // Parameter to pass
+      1,               // Task priority
+      NULL             // Task handle
+  );
 }
 
 void loop()
@@ -715,21 +736,6 @@ void loop()
   {
     previousSymbolSelect = symbolSelect;
     DisplayStockData(parameters.symbolData.at(symbolSelect));
-  }
-
-  // Fetch symbol data.
-  if (millis() - startDataRequest > (60 / parameters.apiMaxRequestsPerMinute) * 1000)
-  {
-    startDataRequest = millis();
-
-    xTaskCreate(
-        ApiCall,   // Function that should be called
-        "ApiCall", // Name of the task (for debugging)
-        8192,      // Stack size (bytes)
-        NULL,      // Parameter to pass
-        1,         // Task priority
-        NULL       // Task handle
-    );
   }
 
   // Fetch time.
