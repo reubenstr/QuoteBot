@@ -4,14 +4,20 @@
 #include <SPI.h>
 #include <TFT_eSPI.h>
 #include <SD.h>
-#include <ArduinoJson.h>
 #include <vector>
+#include <WiFi.h>
+#include <HTTPClient.h>
+
+#define ARDUINOJSON_USE_LONG_LONG 1
+#include <ArduinoJson.h>
 
 #define PIN_LCD_BACKLIGHT_PWM 21
 #define PIN_SD_CHIP_SELECT 15
 
 // Use hardware SPI
 TFT_eSPI tft = TFT_eSPI();
+
+const float peRatioNA = 0.0;
 
 // WiFi
 
@@ -35,9 +41,9 @@ struct SymbolData
   float peRatio;
   float week52High;
   float week52Low;
-  unsigned long lastUpdate;
+  unsigned long long lastUpdate;
+  String errorString;
 };
-
 
 struct Parameters
 {
@@ -70,6 +76,7 @@ struct Status
   bool api;
   bool time;
   bool symbolLocked;
+  bool requestInProgess;
 
   bool operator!=(Status const &s)
   {
@@ -77,7 +84,8 @@ struct Status
             sd != s.sd ||
             api != s.api ||
             time != s.time ||
-            symbolLocked != s.symbolLocked);
+            symbolLocked != s.symbolLocked ||
+            requestInProgess != s.requestInProgess);
   }
 
 } status;
@@ -156,18 +164,15 @@ bool GetParametersFromSDCard()
 
   // TODO: check for valid parameters.json file.
   // Check if expected parameters exist, if not alert user, and provide default file example.
-  int numSymbols = doc["symbols"].size();
 
-  for (int i = 0; i < numSymbols; i++)
+  for (int i = 0; i < doc["symbols"].size(); i++)
   {
     SymbolData sData;
     sData.symbol = doc["symbols"][i].as<String>();
     parameters.symbolData.push_back(sData);
   }
 
-  int numWifi = doc["wifiCredentials"].size();
-
-  for (int i = 0; i < numWifi; i++)
+  for (int i = 0; i < doc["wifiCredentials"].size(); i++)
   {
     WifiCredentials wC;
     wC.ssid = doc["wifiCredentials"][i]["ssid"].as<String>();
@@ -175,31 +180,22 @@ bool GetParametersFromSDCard()
     parameters.wifiCredentials.push_back(wC);
   }
 
+  parameters.timeZone = doc["timeZone"].as<String>();
+  parameters.apiProvider = doc["apiProvider"].as<String>();
+  parameters.apiKey = doc["apiKey"].as<String>();
   parameters.apiMaxRequestsPerMinute = doc["apiMaxRequestsPerMinute"].as<int>();
-
   parameters.nextSymbolDelay = doc["nextSymbolDelay"].as<int>();
+  parameters.brightnessMax = doc["brightnessMax"].as<int>();
+  parameters.brightnessMin = doc["brightnessMin"].as<int>();
+  parameters.dimStartHour = doc["dimStartHour"].as<int>();
+  parameters.dimEndHour = doc["dimEndHour"].as<int>();
+
+  // Conform parameters into acceptable ranges.
+
   if (parameters.nextSymbolDelay < 1)
   {
     parameters.nextSymbolDelay = 1;
   }
-
-  /*
-  timeZone = doc["timeZone"].as<String>();
-
-  int indicatorBrightnessParameter = doc["indicatorBrightness"].as<int>();
-  int signBrightnessParameter = doc["signBrightness"].as<int>();
-
-
-  if (indicatorBrightnessParameter > 9 && indicatorBrightnessParameter < 256)
-  {
-    indicatorBrightness = indicatorBrightnessParameter;
-  }
-
-  if (signBrightnessParameter > 25 && signBrightnessParameter < 256)
-  {
-    signBrightness = signBrightnessParameter;
-  }
-  */
 
   file.close();
   return true;
@@ -297,12 +293,13 @@ void UpdateIndicators()
     DisplayIndicator("SD", 10, y, status.sd ? TFT_GREEN : TFT_RED);
     DisplayIndicator("WIFI", 45, y, status.wifi ? TFT_GREEN : TFT_RED);
     DisplayIndicator("API", 110, y, status.api ? TFT_GREEN : TFT_RED);
-    DisplayIndicator("L", 170, y, status.symbolLocked ? TFT_BLUE : TFT_BLACK);
+    DisplayIndicator("L", 150, y, status.symbolLocked ? TFT_BLUE : TFT_BLACK);
+    DisplayIndicator("R", 180, y, status.symbolLocked ? TFT_BLUE : TFT_BLACK);
     DisplayIndicator("12:23:12", 215, y, status.time ? TFT_GREEN : TFT_RED);
   }
 }
 
-void DisplayStockData(SymbolData stockData)
+void DisplayStockData(SymbolData symbolData)
 {
   char buf[32];
   const int indent = 10;
@@ -320,55 +317,55 @@ void DisplayStockData(SymbolData stockData)
   tft.setTextSize(3);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   String spaced;
-  if (stockData.symbol.length() == 1)
-    spaced = "  " + stockData.symbol + "  ";
-  else if (stockData.symbol.length() == 2)
-    spaced = " " + stockData.symbol + "  ";
-  else if (stockData.symbol.length() == 3)
-    spaced = " " + stockData.symbol + " ";
-  else if (stockData.symbol.length() == 4)
-    spaced = "" + stockData.symbol + " ";
+  if (symbolData.symbol.length() == 1)
+    spaced = "  " + symbolData.symbol + "  ";
+  else if (symbolData.symbol.length() == 2)
+    spaced = " " + symbolData.symbol + "  ";
+  else if (symbolData.symbol.length() == 3)
+    spaced = " " + symbolData.symbol + " ";
+  else if (symbolData.symbol.length() == 4)
+    spaced = "" + symbolData.symbol + " ";
   else
-    spaced = stockData.symbol;
+    spaced = symbolData.symbol;
   tft.drawString(spaced, indent, 7);
 
   // Name.
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextSize(2);
 
-  String name = stockData.companyName;
-  if (stockData.companyName.length() > 15)
+  String name = symbolData.companyName;
+  if (symbolData.companyName.length() > 15)
   {
     // name = stockData.companyName.substring(0, 9);
-    tft.drawString(stockData.companyName.substring(0, 14), indent + 110, 12);
+    tft.drawString(symbolData.companyName.substring(0, 14), indent + 110, 12);
     tft.drawPixel(300, 25, TFT_WHITE);
     tft.drawPixel(303, 25, TFT_WHITE);
     tft.drawPixel(306, 25, TFT_WHITE);
   }
   else
   {
-    tft.drawString(stockData.companyName, indent + 110, 12);
+    tft.drawString(symbolData.companyName, indent + 110, 12);
   }
 
   // Price.
   tft.setTextSize(6);
   tft.setTextColor(TFT_GREEN, TFT_BLACK);
-  sprintf(buf, "   %i   ", stockData.currentPrice);
+  sprintf(buf, "  %4.2f  ", symbolData.currentPrice);
   int tw = tft.textWidth(String(buf));
   tft.drawString(buf, tft.height() / 2 - tw / 2, 50);
 
   // Change.
   tft.setTextSize(3);
-  sprintf(buf, "%1.2f", stockData.change);
+  sprintf(buf, "%1.2f", symbolData.change);
   tft.drawString(buf, 40, 110);
 
   // Percent change.
-  if (stockData.changePercent < 10)
-    sprintf(buf, "%1.2f%%", stockData.changePercent);
-  else if (stockData.changePercent < 100)
-    sprintf(buf, "%2.1f%%", stockData.changePercent);
+  if (symbolData.changePercent < 10)
+    sprintf(buf, "%1.2f%%", symbolData.changePercent);
+  else if (symbolData.changePercent < 100)
+    sprintf(buf, "%2.1f%%", symbolData.changePercent);
   else
-    sprintf(buf, "%3.0f%%", stockData.changePercent);
+    sprintf(buf, "%3.0f%%", symbolData.changePercent);
   tft.drawString(buf, 175, 110);
 
   // Extra data.
@@ -376,30 +373,138 @@ void DisplayStockData(SymbolData stockData)
   tft.setTextColor(TFT_BLUE, TFT_BLACK);
   //sprintf(buf, "Open: %3.2f", stockData.openPrice);
   //tft.drawString(buf, 10, 175);
-  sprintf(buf, "%3.2f", stockData.openPrice);
+  sprintf(buf, "%3.2f", symbolData.openPrice);
   tft.drawString("Open", 10, 160);
   tft.drawString(buf, 10, 182);
 
-  sprintf(buf, "%3.2f", stockData.peRatio);
   tft.drawString("P/E", 120, 160);
+
+  if (symbolData.peRatio == peRatioNA)
+  {
+    sprintf(buf, "   N/A   ");
+  }
+  else
+  {
+    sprintf(buf, "%3.2f", symbolData.peRatio);
+  }
   tft.drawString(buf, 120, 182);
 
-  sprintf(buf, "%3.2f", stockData.lastUpdate);
+  sprintf(buf, "%3.2f", symbolData.lastUpdate);
   tft.drawString("Update", 220, 160);
   tft.drawString("12:01:35", 220, 182);
 
   // 52 week
+  static int x52;
   int y = 143;
-  int x = mapFloat(stockData.currentPrice, stockData.week52Low, stockData.week52High, 20, tft.height() - 20);
+  tft.fillRect(x52, y, 5, 10, TFT_BLACK);
+  x52 = mapFloat(symbolData.currentPrice, symbolData.week52Low, symbolData.week52High, 20, tft.height() - 20);
   tft.drawLine(20, y + 5, tft.height() - 20, y + 5, TFT_YELLOW);
-  tft.fillRect(x, y, 5, 10, TFT_YELLOW);
+  tft.fillRect(x52, y, 5, 10, TFT_YELLOW);
 }
 
-bool GetSymbolData(SymbolData *stockData)
+bool GetSymbolDataFromAPI(SymbolData *symbolData)
+{
+  String payload;
+  String host = "https://cloud.iexapis.com/stable/stock/" + symbolData->symbol + "/quote?token=" + parameters.apiKey;
+
+  Serial.print("API: Connecting to ");
+  Serial.println(host);
+
+  HTTPClient http;
+  http.begin(host);
+  int httpCode = http.GET();
+
+  if (httpCode > 0)
+  {
+    Serial.print("WIFI: HTTP code: ");
+    Serial.println(httpCode);
+    payload = http.getString();
+    Serial.println("API: [RESPONSE]");
+    Serial.println(payload);
+    http.end();
+
+    if (httpCode != 200)
+    {
+      return false;
+    }
+  }
+  else
+  {
+    Serial.print("WIFI: Connection failed, HTTP client code: ");
+    Serial.println(httpCode);
+    symbolData->errorString = String(httpCode);
+    http.end();
+    return false;
+  }
+
+  // Check for endpoint error messages.
+  if (payload.equalsIgnoreCase("Unknown symbol"))
+  {
+    Serial.print("API: Error from endpoint: Unknown symbol");
+    symbolData->errorString = "Unknown symbol";
+    return false;
+  }
+  if (payload.equalsIgnoreCase("Forbidden"))
+  {
+    Serial.print("API: Error from endpoint: Forbidden");
+    symbolData->errorString = "Forbidden";
+    return false;
+  }
+
+  DynamicJsonDocument doc(2048);
+  DeserializationError jsonError = deserializeJson(doc, payload);
+
+  if (jsonError)
+  {
+    Serial.print(F("JSON: DeserializeJson() failed: "));
+    Serial.println(jsonError.c_str());
+    symbolData->errorString = "JSON: jsonError.c_str()";
+    return false;
+  }
+
+  symbolData->companyName = doc["companyName"].as<String>();
+  symbolData->openPrice = doc["previousClose"].as<float>();
+
+  symbolData->change = doc["change"].as<float>();
+  symbolData->changePercent = doc["changePercent"].as<float>();
+  symbolData->week52High = doc["week52High"].as<float>();
+  symbolData->week52High = doc["week52High"].as<float>();
+  symbolData->week52Low = doc["week52Low"].as<float>();
+  symbolData->lastUpdate = doc["iexLastUpdated"].as<long long>();
+
+  // OTC stocks have different price locations. (?)
+  if (doc["iexRealtimePrice"].is<float>())
+  {
+    symbolData->currentPrice = doc["iexRealtimePrice"].as<float>();
+  }
+  else
+  {
+    symbolData->currentPrice = doc["extendedPrice"].as<float>();
+  }
+
+  if (doc["peRatio"].is<float>())
+  {
+    symbolData->peRatio = doc["peRatio"].as<float>();
+  }
+  else
+  {
+    symbolData->peRatio = peRatioNA;
+  }
+
+  return true;
+}
+
+bool GetSymbolData(SymbolData *symbolData)
 {
 
-  Serial.printf("API: Requesting data for symbol: %s\n", stockData->symbol.c_str());
+  status.requestInProgess = true;
+  UpdateIndicators();
 
+  Serial.printf("API: Requesting data for symbol: %s\n", symbolData->symbol.c_str());
+
+  bool flag = GetSymbolDataFromAPI(symbolData);
+
+  /*
   stockData->companyName = "First Magestic Silver Co.";
   stockData->openPrice = 16.365;
   stockData->currentPrice = 9.24 * symbolSelect;
@@ -409,8 +514,10 @@ bool GetSymbolData(SymbolData *stockData)
   stockData->week52High = 24.01;
   stockData->week52Low = 4.17;
   stockData->lastUpdate = 24135179;
+  */
+  status.requestInProgess = false;
 
-  return true;
+  return flag;
 }
 
 // Touch screen requires calibation, orientation may be inversed.
@@ -454,6 +561,50 @@ void CheckTouchScreen()
   }
 }
 
+bool ConnectWifi()
+{
+  int wifiCredentialsIndex = 0;
+
+  while (1)
+  {
+    tft.fillScreen(TFT_BLACK);
+    tft.setCursor(0, 0);
+    tft.setTextSize(2);
+    tft.setTextColor(TFT_GREEN);
+    tft.printf("Connecting to WiFi\n");
+    tft.printf("SSID: %s\n", parameters.wifiCredentials[wifiCredentialsIndex].ssid.c_str());
+    tft.printf("Password: %s\n", parameters.wifiCredentials[wifiCredentialsIndex].password.c_str());
+
+    Serial.printf("WIFI: Connecting to SSID: %s, with password: %s\n", parameters.wifiCredentials[wifiCredentialsIndex].ssid.c_str(), parameters.wifiCredentials[wifiCredentialsIndex].password.c_str());
+
+    WiFi.begin(parameters.wifiCredentials[wifiCredentialsIndex].ssid.c_str(), parameters.wifiCredentials[wifiCredentialsIndex].password.c_str());
+
+    int count = 0;
+    while (count++ < 10)
+    {
+      delay(500);
+      tft.print(".");
+      Serial.print(".");
+
+      if (WiFi.status() == WL_CONNECTED)
+      {
+        tft.fillScreen(TFT_BLACK);
+        Serial.println("");
+        Serial.printf("WIFI: WiFi connected to %s\n", WiFi.localIP().toString().c_str());
+        return true;
+      }
+    }
+
+    Serial.println("");
+
+    wifiCredentialsIndex++;
+    if (wifiCredentialsIndex > parameters.wifiCredentials.size() - 1)
+    {
+      wifiCredentialsIndex = 0;
+    }
+  }
+}
+
 void setup()
 {
 
@@ -478,6 +629,14 @@ void setup()
   {
     Error(ErrorIDs::ParametersFailed);
   }
+
+  if (ConnectWifi())
+  {
+  }
+  else
+  {
+    Serial.println("WiFi not connected.");
+  }
 }
 
 void loop()
@@ -500,14 +659,9 @@ void loop()
         symbolSelect = 0;
       }
     }
-  }
 
-  // Update symbol data.
-  if (millis() - startDataRequest > (60 / parameters.apiMaxRequestsPerMinute) * 1000)
-  {
-    startDataRequest = millis();
- 
-    status.api = GetSymbolData(&parameters.symbolData[symbolSelect]);   
+    // TEMP: figure out how to handle requests and track the timing.
+    status.api = GetSymbolData(&parameters.symbolData[symbolSelect]);
   }
 
   // Update display with symbol data.
@@ -516,5 +670,13 @@ void loop()
   {
     previousSymbolSelect = symbolSelect;
     DisplayStockData(parameters.symbolData.at(symbolSelect));
+  }
+
+  // Update symbol data.
+  if (millis() - startDataRequest > (60 / parameters.apiMaxRequestsPerMinute) * 1000)
+  {
+    startDataRequest = millis();
+
+    //status.api = GetSymbolData(&parameters.symbolData[symbolSelect]);
   }
 }
