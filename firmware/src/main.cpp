@@ -13,6 +13,7 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include "time.h"
+//#include <TimeLib.h>
 
 #define ARDUINOJSON_USE_LONG_LONG 1
 #include <ArduinoJson.h>
@@ -275,6 +276,7 @@ void getTextBounds(const char *str, int16_t x, int16_t y,
 
 void DisplayIndicator(String string, int x, int y, uint16_t color)
 {
+  /*
   int16_t x1, y1;
   uint16_t w, h;
   const int offset = 2;
@@ -285,6 +287,14 @@ void DisplayIndicator(String string, int x, int y, uint16_t color)
   tft.setTextPadding(5);
   tft.setTextColor(TFT_BLACK, color);
   tft.print(string);
+  */
+
+  tft.setTextSize(2);
+  tft.setTextDatum(CC_DATUM);
+  tft.setTextColor(TFT_BLACK, color);
+  int padding = tft.textWidth(string);
+  tft.setTextPadding(padding + 10);
+  tft.drawString(string.c_str(), x, y);
 }
 
 void UpdateIndicators(bool forceUpdate = false)
@@ -294,14 +304,17 @@ void UpdateIndicators(bool forceUpdate = false)
   {
     previousStatus = status;
 
-    String timeString = String(timeinfo.tm_hour) + ":" + String(timeinfo.tm_min) + ":" + String(timeinfo.tm_sec);
+    char buf[12];
+    sprintf(buf, "%02u:%02u:%02u", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+
+    //String timeString = String(timeinfo.tm_hour) + ":" + String(timeinfo.tm_min) + ":" + String(timeinfo.tm_sec);
     int y = 217;
     DisplayIndicator("SD", 10, y, status.sd ? TFT_GREEN : TFT_RED);
     DisplayIndicator("WIFI", 45, y, status.wifi ? TFT_GREEN : TFT_RED);
     DisplayIndicator("API", 100, y, status.api ? TFT_GREEN : TFT_RED);
     DisplayIndicator("L", 155, y, status.symbolLocked ? TFT_BLUE : TFT_BLACK);
     DisplayIndicator("R", 190, y, status.requestInProgess ? TFT_BLUE : TFT_BLACK);
-    DisplayIndicator(timeString, 215, y, status.time ? TFT_GREEN : TFT_RED);
+    DisplayIndicator(String(buf), 215, y, status.time ? TFT_GREEN : TFT_RED);
   }
 }
 
@@ -311,7 +324,7 @@ void DisplayStockData(SymbolData symbolData)
   const int indent = 10;
 
   tft.setTextFont(0);
-  tft.setTextDatum(MC_DATUM);
+
   //tft.setFreeFont(&FreeMono9pt7b);
 
   // Frame.
@@ -320,15 +333,17 @@ void DisplayStockData(SymbolData symbolData)
   tft.drawFastHLine(0, 205, tft.width(), TFT_WHITE);
   tft.drawFastVLine(105, 0, 35, TFT_WHITE);
 
+  //////////////////////////////////////////////////////
   // Symbol.
   tft.setTextSize(3);
+  tft.setTextDatum(TC_DATUM);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.drawString(AddEvenSpaces(symbolData.symbol, 5), indent, 7);
+  tft.setTextPadding(tft.textWidth("12345"));
+  tft.drawString(symbolData.symbol, 50, 7);
 
   // Name.
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextSize(2);
-
+  tft.setTextDatum(TL_DATUM);
   String name = symbolData.companyName;
   if (symbolData.companyName.length() > 15)
   {
@@ -342,7 +357,13 @@ void DisplayStockData(SymbolData symbolData)
   {
     tft.drawString(symbolData.companyName, indent + 110, 12);
   }
+  //////////////////////////////////////////////////////
 
+  // Price.
+
+  //////////////////////////////////////////////////////
+  tft.setTextSize(6);
+  tft.setTextDatum(TC_DATUM);
   if (symbolData.change < 0)
   {
     tft.setTextColor(TFT_RED, TFT_BLACK);
@@ -355,70 +376,81 @@ void DisplayStockData(SymbolData symbolData)
   {
     tft.setTextColor(TFT_MAGENTA, TFT_BLACK);
   }
+  tft.setTextPadding(tft.textWidth("12345.78"));
 
-  // Price.
-  tft.setTextSize(6);
   sprintf(buf, "%4.2f", symbolData.currentPrice);
-  int tw = tft.textWidth(String(buf));
-  tft.drawString(buf, tft.height() / 2 - tw / 2, 50);
-  tft.fillRect(1, 50, (tft.height() - tw) / 2, 45, TFT_ORANGE);
-  tft.fillRect(tft.height() / 2 + tw / 2, 50, (tft.height() - tw) / 2 - 1, 45, TFT_ORANGE);
+  //int tw = tft.textWidth(String(buf));
+
+  tft.drawString(buf, tft.height() / 2, 50);
+  //tft.fillRect(1, 50, (tft.height() - tw) / 2, 45, TFT_ORANGE);
+  // tft.fillRect(tft.height() / 2 + tw / 2, 50, (tft.height() - tw) / 2 - 1, 45, TFT_ORANGE);
 
   // Change.
   tft.setTextSize(3);
+  tft.setTextPadding(tft.textWidth("123.56"));
   sprintf(buf, "%1.2f", symbolData.change);
-
-
-
-  tft.drawString(buf, 40, 110);
-
-
-
-
+  tft.drawString(buf, 90, 110);
 
   // Percent change.
+  /*
   if (symbolData.changePercent < 10)
     sprintf(buf, "%1.2f%%", symbolData.changePercent);
   else if (symbolData.changePercent < 100)
     sprintf(buf, "%2.1f%%", symbolData.changePercent);
   else
     sprintf(buf, "%3.0f%%", symbolData.changePercent);
-  tft.drawString(buf, 175, 110);
-
-  // Extra data.
-  tft.setTextSize(2);
-  tft.setTextColor(TFT_BLUE, TFT_BLACK);
-  //sprintf(buf, "Open: %3.2f", stockData.openPrice);
-  //tft.drawString(buf, 10, 175);
-  // Open.
-  sprintf(buf, "%3.2f", symbolData.openPrice);
-  tft.drawString("Open", 10, 160);
-  tft.drawString(buf, 10, 182);
-
-  // PE.
-  tft.drawString("P/E", 120, 160);
-  if (symbolData.peRatio == peRatioNA)
-  {
-    sprintf(buf, "   N/A   ");
-  }
-  else
-  {
-    sprintf(buf, "%3.2f", symbolData.peRatio);
-  }
-  tft.drawString(buf, 120, 182);
-
-  // Update.
-  sprintf(buf, "%3.2f", symbolData.lastUpdate);
-  tft.drawString("Update", 255, 160);
-  tft.drawString("12:01:35", 210, 182);
+    */
+  tft.setTextPadding(tft.textWidth("-2345.67"));
+  sprintf(buf, "%3.2f%%", symbolData.changePercent);
+  tft.drawString(buf, tft.height() - 90, 110);
+  //////////////////////////////////////////////////////
 
   // 52 week
+  //////////////////////////////////////////////////////
   static int x52;
   int y = 143;
   tft.fillRect(x52, y, 5, 10, TFT_BLACK);
   x52 = mapFloat(symbolData.currentPrice, symbolData.week52Low, symbolData.week52High, 20, tft.height() - 20);
   tft.drawLine(20, y + 5, tft.height() - 20, y + 5, TFT_YELLOW);
   tft.fillRect(x52, y, 5, 10, TFT_YELLOW);
+  //////////////////////////////////////////////////////
+
+  // Extra data.
+  //////////////////////////////////////////////////////
+  tft.setTextSize(2);
+  tft.setTextColor(TFT_BLUE, TFT_BLACK);
+
+  // PE.
+  tft.drawString("P/E", 50, 160);
+  if (symbolData.peRatio == peRatioNA)
+  {
+    sprintf(buf, "N/A");
+  }
+  else
+  {
+    sprintf(buf, "%3.2f", symbolData.peRatio);
+  }
+  tft.setTextPadding(tft.textWidth("-123.56"));
+  tft.drawString(buf, 50, 182);
+
+  //sprintf(buf, "Open: %3.2f", stockData.openPrice);
+  //tft.drawString(buf, 10, 175);
+  // Open.
+  tft.setTextPadding(tft.textWidth("12345.78"));
+  sprintf(buf, "%3.2f", symbolData.openPrice);
+  tft.drawString("Open", 150, 160);
+  tft.drawString(buf, 150, 182);
+
+  // Update.
+  tft.setTextPadding(0);
+  // http://www.cplusplus.com/reference/ctime/tm/
+  time_t rawtime(symbolData.lastUpdate);
+  struct tm *tInfo(localtime(&rawtime)); 
+  sprintf(buf, "%02u:%02u:%02u", tInfo->tm_hour, tInfo->tm_min, tInfo->tm_sec);
+  //sprintf(buf, "%3.2f", symbolData.lastUpdate);
+  tft.drawString("Update", 265, 160);
+  tft.drawString(buf, 265, 182);
+  //////////////////////////////////////////////////////
 }
 
 bool GetSymbolDataFromAPI(SymbolData *symbolData)
@@ -528,26 +560,26 @@ void GetSymbolData(void *)
       status.requestInProgess = true;
 
       // Get index symbol with oldest data.
-      int selectedIndex = 0;    
+      int selectedIndex = 0;
       for (int i = 0; i < parameters.symbolData.size(); i++)
       {
-          if (parameters.symbolData[i].lastUpdate > parameters.symbolData[selectedIndex].lastUpdate)
-          {
-            selectedIndex = i;
-          }
+        if (parameters.symbolData[i].lastUpdate > parameters.symbolData[selectedIndex].lastUpdate)
+        {
+          selectedIndex = i;
+        }
       }
 
-      Serial.printf("API: Requesting data for symbol: %s\n", parameters.symbolData[selectedIndex].symbol.c_str()); 
-      
+      Serial.printf("API: Requesting data for symbol: %s\n", parameters.symbolData[selectedIndex].symbol.c_str());
+
       if (parameters.apiProvider.equalsIgnoreCase("IEXCLOUD"))
       {
-          status.api = GetSymbolDataFromAPI(&parameters.symbolData[selectedIndex]);
+        status.api = GetSymbolDataFromAPI(&parameters.symbolData[selectedIndex]);
       }
       else
       {
         status.api = false;
-      } 
-      
+      }
+
       status.requestInProgess = false;
     }
   }
@@ -658,7 +690,7 @@ void setup()
 {
   delay(500);
   Serial.begin(115200);
-  Serial.println(F("QuoteBot starting up..."));
+  Serial.println(F("\nQuoteBot starting up..."));
 
   tft.init();
   delay(50);
@@ -694,7 +726,6 @@ void setup()
   {
     n.currentPrice = pow(10, random(1, 5));
   }
-
 
   xTaskCreate(
       GetSymbolData,   // Function that should be called
