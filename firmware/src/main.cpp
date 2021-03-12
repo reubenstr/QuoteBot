@@ -17,10 +17,13 @@
 #define ARDUINOJSON_USE_LONG_LONG 1
 #include <ArduinoJson.h>
 
+#include "utilities.h" // Local
+
+// Pins.
 #define PIN_LCD_BACKLIGHT_PWM 21
 #define PIN_SD_CHIP_SELECT 15
 
-// Use hardware SPI
+// GLCD.
 TFT_eSPI tft = TFT_eSPI();
 
 const float peRatioNA = 0.0;
@@ -32,7 +35,6 @@ const long gmtOffset_sec = -5 * 60 * 60;
 const int daylightOffset_sec = 3600;
 
 // WiFi
-
 struct WifiCredentials
 {
   String ssid;
@@ -213,15 +215,6 @@ bool GetParametersFromSDCard()
   return true;
 }
 
-float mapFloat(float x, float in_min, float in_max, float out_min, float out_max)
-{
-  const float dividend = out_max - out_min;
-  const float divisor = in_max - in_min;
-  const float delta = x - in_min;
-
-  return (delta * dividend + (divisor / 2)) / divisor + out_min;
-}
-
 // Solution provided by : https://github.com/Bodmer/TFT_eSPI/issues/6
 void charBounds(char c, int16_t *x, int16_t *y,
                 int16_t *minx, int16_t *miny, int16_t *maxx, int16_t *maxy)
@@ -329,18 +322,7 @@ void DisplayStockData(SymbolData symbolData)
   // Symbol.
   tft.setTextSize(3);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  String spaced;
-  if (symbolData.symbol.length() == 1)
-    spaced = "  " + symbolData.symbol + "  ";
-  else if (symbolData.symbol.length() == 2)
-    spaced = " " + symbolData.symbol + "  ";
-  else if (symbolData.symbol.length() == 3)
-    spaced = " " + symbolData.symbol + " ";
-  else if (symbolData.symbol.length() == 4)
-    spaced = "" + symbolData.symbol + " ";
-  else
-    spaced = symbolData.symbol;
-  tft.drawString(spaced, indent, 7);
+  tft.drawString(AddEvenSpaces(symbolData.symbol, 5), indent, 7);
 
   // Name.
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
@@ -360,12 +342,26 @@ void DisplayStockData(SymbolData symbolData)
     tft.drawString(symbolData.companyName, indent + 110, 12);
   }
 
+  if (symbolData.change < 0)
+  {
+    tft.setTextColor(TFT_RED, TFT_BLACK);
+  }
+  else if (symbolData.change > 0)
+  {
+    tft.setTextColor(TFT_GREEN, TFT_BLACK);
+  }
+  else
+  {
+    tft.setTextColor(TFT_MAGENTA, TFT_BLACK);
+  }
+
   // Price.
   tft.setTextSize(6);
-  tft.setTextColor(TFT_GREEN, TFT_BLACK);
-  sprintf(buf, "  %4.2f  ", symbolData.currentPrice);
+  sprintf(buf, "%4.2f", symbolData.currentPrice);
   int tw = tft.textWidth(String(buf));
   tft.drawString(buf, tft.height() / 2 - tw / 2, 50);
+  tft.fillRect(1, 50, (tft.height() - tw) / 2, 45, TFT_ORANGE);
+  tft.fillRect(tft.height() / 2 + tw / 2, 50, (tft.height() - tw) / 2 - 1, 45, TFT_ORANGE);
 
   // Change.
   tft.setTextSize(3);
@@ -386,12 +382,13 @@ void DisplayStockData(SymbolData symbolData)
   tft.setTextColor(TFT_BLUE, TFT_BLACK);
   //sprintf(buf, "Open: %3.2f", stockData.openPrice);
   //tft.drawString(buf, 10, 175);
+  // Open.
   sprintf(buf, "%3.2f", symbolData.openPrice);
   tft.drawString("Open", 10, 160);
   tft.drawString(buf, 10, 182);
 
+  // PE.
   tft.drawString("P/E", 120, 160);
-
   if (symbolData.peRatio == peRatioNA)
   {
     sprintf(buf, "   N/A   ");
@@ -402,9 +399,10 @@ void DisplayStockData(SymbolData symbolData)
   }
   tft.drawString(buf, 120, 182);
 
+  // Update.
   sprintf(buf, "%3.2f", symbolData.lastUpdate);
-  tft.drawString("Update", 220, 160);
-  tft.drawString("12:01:35", 220, 182);
+  tft.drawString("Update", 255, 160);
+  tft.drawString("12:01:35", 210, 182);
 
   // 52 week
   static int x52;
@@ -647,14 +645,17 @@ void ApiCall(void *SymbolData)
 
 void setup()
 {
-
+  delay(500);
   Serial.begin(115200);
+  Serial.println(F("QuoteBot starting up..."));
 
   tft.init();
   delay(50);
   tft.setRotation(3);
   delay(50);
+  tft.fillScreen(TFT_BLACK);
 
+  // LCD backlight PWM.
   ledcSetup(0, 5000, 8);
   ledcAttachPin(PIN_LCD_BACKLIGHT_PWM, 0);
   ledcWrite(0, 255);
@@ -663,7 +664,7 @@ void setup()
   {
     status.sd = true;
   }
-  else 
+  else
   {
     Error(ErrorIDs::SdFailed);
   }
@@ -676,6 +677,12 @@ void setup()
   ConnectWifi();
 
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+
+  // TEMP TEST FILL
+  for (auto &n : parameters.symbolData)
+  {
+    n.currentPrice = pow(10, random(1, 5));
+  }
 }
 
 void loop()
@@ -700,19 +707,6 @@ void loop()
         symbolSelect = 0;
       }
     }
-
-    // TEMP: figure out how to handle requests and track the timing.
-    //status.api = GetSymbolData(&parameters.symbolData[symbolSelect]);
-
-    /*   */
-    xTaskCreate(
-        ApiCall,   // Function that should be called
-        "ApiCall", // Name of the task (for debugging)
-        8192,      // Stack size (bytes)
-        NULL,      // Parameter to pass
-        1,         // Task priority
-        NULL       // Task handle
-    );
   }
 
   // Update display with symbol data.
@@ -723,14 +717,22 @@ void loop()
     DisplayStockData(parameters.symbolData.at(symbolSelect));
   }
 
-  // Update symbol data.
+  // Fetch symbol data.
   if (millis() - startDataRequest > (60 / parameters.apiMaxRequestsPerMinute) * 1000)
   {
     startDataRequest = millis();
 
-    //status.api = GetSymbolData(&parameters.symbolData[symbolSelect]);
+    xTaskCreate(
+        ApiCall,   // Function that should be called
+        "ApiCall", // Name of the task (for debugging)
+        8192,      // Stack size (bytes)
+        NULL,      // Parameter to pass
+        1,         // Task priority
+        NULL       // Task handle
+    );
   }
 
+  // Fetch time.
   static unsigned long startGetTime = millis();
   if (millis() - startGetTime > 750)
   {
