@@ -4,6 +4,12 @@
 
   Phase: development.
 
+  TODO:
+
+  determine market hours for matrix... and other possible indicators?
+  determine weekend hours for price color change to magenta.
+    after hours API halt.
+
 
 */
 
@@ -37,6 +43,7 @@ const long gmtOffset_sec = -5 * 60 * 60;
 const int daylightOffset_sec = 3600;
 
 // WiFi.
+const unsigned long wifiTimeoutUntilNewScan = 60000; // milliseconds.
 struct WifiCredentials
 {
   String ssid;
@@ -141,7 +148,8 @@ struct Status
 enum class ErrorIDs
 {
   SdFailed,
-  ParametersFailed
+  ParametersFailed,
+  InvalidApiKey
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -158,12 +166,16 @@ void Error(ErrorIDs errorId)
     tft.drawString("SD Card", 30, 90);
     tft.drawString("not found.", 30, 130);
   }
-
-  if (errorId == ErrorIDs::ParametersFailed)
+  else if (errorId == ErrorIDs::ParametersFailed)
   {
     tft.drawString("SD Card", 30, 90);
     tft.drawString("parameters", 30, 130);
     tft.drawString("are invalid.", 30, 170);
+  }
+  else if (errorId == ErrorIDs::InvalidApiKey)
+  {
+    tft.drawString("Invalid", 30, 90);
+    tft.drawString("API key.", 30, 130);
   }
 
   while (1)
@@ -329,22 +341,17 @@ void DisplayStockData(SymbolData symbolData)
   tft.drawFastHLine(0, 205, tft.width(), TFT_WHITE);
   tft.drawFastVLine(100, 0, 35, TFT_WHITE);
 
- Serial.println(symbolData.errorString);
-  Serial.println(symbolData.errorString);
-   Serial.println(symbolData.errorString);
-  Serial.println(symbolData.errorString);
+  // Symbol.
+  tft.setTextSize(3);
+  tft.setTextDatum(TC_DATUM);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextPadding(tft.textWidth("12345"));
+  tft.drawString(symbolData.symbol, 52, 7);
 
   if (symbolData.isValid)
   {
-    //////////////////////////////////////////////////////
-    // Symbol.
-    tft.setTextSize(3);
-    tft.setTextDatum(TC_DATUM);
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    tft.setTextPadding(tft.textWidth("12345"));
-    tft.drawString(symbolData.symbol, 52, 7);
 
-    // Name.
+    // Compant name.
     tft.setTextSize(2);
     tft.setTextDatum(TL_DATUM);
     String name = symbolData.companyName;
@@ -357,6 +364,7 @@ void DisplayStockData(SymbolData symbolData)
     }
     else
     {
+      tft.setTextPadding(tft.textWidth("12345678901234567"));
       tft.drawString(symbolData.companyName, 115, 12);
     }
     //////////////////////////////////////////////////////
@@ -386,17 +394,17 @@ void DisplayStockData(SymbolData symbolData)
     tft.setTextSize(3);
     tft.setTextPadding(tft.textWidth("123.56"));
     sprintf(buf, "%1.2f", symbolData.change);
-    tft.drawString(buf, 90, 115);
+    tft.drawString(buf, 90, 113);
 
     tft.setTextPadding(tft.textWidth("-2345.67"));
     sprintf(buf, "%3.2f%%", symbolData.changePercent);
-    tft.drawString(buf, tft.height() - 90, 115);
+    tft.drawString(buf, tft.height() - 90, 113);
     //////////////////////////////////////////////////////
 
     // 52 week
     //////////////////////////////////////////////////////
     static int x52;
-    int y = 146;
+    int y = 143;
     tft.fillRect(x52, y, 5, 10, TFT_BLACK);
     x52 = mapFloat(symbolData.currentPrice, symbolData.week52Low, symbolData.week52High, 20, tft.height() - 20);
     tft.drawLine(20, y + 5, tft.height() - 20, y + 5, TFT_YELLOW);
@@ -439,12 +447,14 @@ void DisplayStockData(SymbolData symbolData)
   }
   else
   {
-    tft.fillRect(1, 36, tft.width() - 2, 205 - 36 - 1, TFT_BLACK);
+    // Error message.
+    tft.fillRect(101, 2, tft.height() - 102, 32, TFT_BLACK);        // Name area.
+    tft.fillRect(1, 36, tft.height() - 2, 205 - 36 - 1, TFT_BLACK); // Center area.
     tft.setTextSize(3);
     tft.setTextDatum(TC_DATUM);
     tft.setTextColor(TFT_RED, TFT_BLACK);
-    tft.drawString("Invalid", tft.width() / 2, 100);
-    tft.drawString("Symbol", tft.width() / 2, 150);
+    tft.drawString("Invalid Symbol", tft.height() / 2, 65);
+    //tft.drawString("Symbol", tft.height() / 2, 80);
   }
 }
 
@@ -490,6 +500,7 @@ bool GetSymbolDataFromAPI(SymbolData *symbolData)
       {
         Serial.println("API: Error from endpoint: The API key provided is not valid.");
         symbolData->errorString = "The API key provided is not valid.";
+        Error(ErrorIDs::InvalidApiKey);
         return false;
       }
 
@@ -692,6 +703,10 @@ void setup()
   Serial.begin(115200);
   Serial.println(F("\nQuoteBot starting up..."));
 
+  matrix.setBrightness(127);
+  matrix.begin();
+  matrix.show();
+
   // LCD backlight PWM.
   ledcSetup(0, 5000, 8);
   ledcAttachPin(PIN_LCD_BACKLIGHT_PWM, 0);
@@ -723,12 +738,6 @@ void setup()
 
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
 
-  // TEMP TEST FILL
-  for (auto &n : parameters.symbolData)
-  {
-    n.currentPrice = pow(10, random(1, 5));
-  }
-
   xTaskCreate(
       GetSymbolData,   // Function that should be called
       "GetSymbolData", // Name of the task (for debugging)
@@ -741,14 +750,25 @@ void setup()
 
 void loop()
 {
-
-  status.wifi = WiFi.status() == WL_CONNECTED;
+  static unsigned int previousSymbolSelect;
 
   UpdateNeoPixelMatrix();
 
   CheckTouchScreen();
 
   UpdateIndicators();
+
+  // Check for WiFi connection, attempt reconnect after timeout.
+  status.wifi = WiFi.status() == WL_CONNECTED;
+  static unsigned long startStatus = millis();
+  if (millis() - startStatus > wifiTimeoutUntilNewScan)
+  {
+    ConnectWifi();
+  }
+  if (status.wifi == true)
+  {
+    startStatus = millis();
+  }
 
   // Increment selected symbol.
   static unsigned long startSymbolSelect = millis();
@@ -764,8 +784,15 @@ void loop()
     }
   }
 
+  // Update display after a API completes.
+  static bool previousRequestInProgess;
+  if (previousRequestInProgess == true && status.requestInProgess == false)
+  {
+    previousSymbolSelect = !previousSymbolSelect;
+  }
+  previousRequestInProgess = status.requestInProgess;
+
   // Update display with symbol data.
-  static unsigned int previousSymbolSelect;
   if (previousSymbolSelect != symbolSelect)
   {
     previousSymbolSelect = symbolSelect;
