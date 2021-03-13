@@ -3,18 +3,19 @@
 
 struct SymbolData
 {
-  String symbol;
-  String companyName;
-  float openPrice;
-  float currentPrice;
-  float change;
-  float changePercent;
-  float peRatio;
-  float week52High;
-  float week52Low;
-  unsigned long long lastUpdate;
+  String symbol = "";
+  String companyName = "";
+  float openPrice = 0;
+  float currentPrice = 0;
+  float change = 0;
+  float changePercent = 0;
+  float peRatio = 0;
+  float week52High = 0;
+  float week52Low = 0;
+  unsigned long long lastUpdate = 0;
   bool isValid = true;
-  String errorString;
+  // bool initialized = false;
+  String errorString = "";
 };
 
 struct Api

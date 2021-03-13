@@ -22,11 +22,15 @@
 
   determine market hours for matrix... and other possible indicators?
   determine weekend hours for price color change to magenta.
-    after hours API halt.
+  after hours API halt.
 
     
-    // get market holidays
-    https://cloud.iexapis.com/stable/ref-data/us/dates/holiday/next?token=pk_967cbde31f9247b38d646068f3fb6a30
+  // get market holidays
+  https://cloud.iexapis.com/stable/ref-data/us/dates/holiday/next?token=pk_967cbde31f9247b38d646068f3fb6a30
+
+  Fetch data upon startup even if market is closed.
+  
+
 
   History:
 
@@ -529,23 +533,27 @@ void GetSymbolData(void *)
     {
       start = millis();
 
-      if ((marketState == MarketState::PreHours && parameters.market.fetchPreMarketData) ||
-          (marketState == MarketState::MarketHours) ||
-          (marketState == MarketState::AfterHours && parameters.market.fetchAfterMarketData))      
+      // Get index symbol with oldest data.
+      int selectedIndex = 0;
+      for (int i = 0; i < parameters.symbolData.size(); i++)
       {
-        status.requestInProgess = true;
-
-        // Get index symbol with oldest data.
-        int selectedIndex = 0;
-        for (int i = 0; i < parameters.symbolData.size(); i++)
+        if (parameters.symbolData[i].isValid)
         {
-          if (parameters.symbolData[i].lastUpdate > parameters.symbolData[selectedIndex].lastUpdate && parameters.symbolData[i].isValid)
+          if (parameters.symbolData[i].lastUpdate < parameters.symbolData[selectedIndex].lastUpdate)
           {
             selectedIndex = i;
           }
         }
+      }
+
+      if ((marketState == MarketState::PreHours && parameters.market.fetchPreMarketData) ||
+          (marketState == MarketState::MarketHours) ||
+          (marketState == MarketState::AfterHours && parameters.market.fetchAfterMarketData) ||
+          parameters.symbolData[selectedIndex].lastUpdate == 0)
+      {
 
         Serial.printf("API: Requesting data for symbol: %s\n", parameters.symbolData[selectedIndex].symbol.c_str());
+        status.requestInProgess = true;
 
         if (parameters.api.provider.equalsIgnoreCase("IEXCLOUD"))
         {
@@ -725,7 +733,7 @@ void loop()
   UpdateIndicators();
 
   // Check for WiFi connection, attempt reconnect after timeout.
-  status.wifi = WiFi.status() == WL_CONNECTED;
+  status.wifi = (WiFi.status() == WL_CONNECTED);
   static unsigned long startStatus = millis();
   if (millis() - startStatus > wifiTimeoutUntilNewScan)
   {
