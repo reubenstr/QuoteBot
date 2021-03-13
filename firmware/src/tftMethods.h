@@ -4,4 +4,4 @@
 
 #define CALIBRATION_FILE "/TouchCalData"
 
-void touch_calibrate(TFT_eSPI *tft, bool forceCalibrationFlag);
+void CheckTouchCalibration(TFT_eSPI *tft, bool forceCalibrationFlag);

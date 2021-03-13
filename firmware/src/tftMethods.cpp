@@ -2,14 +2,16 @@
 #include <tftMethods.h>
 #include <TFT_eSPI.h>
 
-
-void  touch_calibrate(TFT_eSPI *tft, bool forceCalibrationFlag)
+void CheckTouchCalibration(TFT_eSPI *tft, bool forceCalibrationFlag)
 {
     uint16_t calData[5];
     uint8_t calDataOK = 0;
 
-    // check file system exists
-    if (!SPIFFS.begin())
+    if (SPIFFS.begin())
+    {
+        Serial.println("SPIFFS: Exists.");
+    }
+    else
     {
         Serial.println("SPIFFS: Formating file system.");
         SPIFFS.format();
@@ -19,7 +21,7 @@ void  touch_calibrate(TFT_eSPI *tft, bool forceCalibrationFlag)
     // check if calibration file exists and size is correct
     if (SPIFFS.exists(CALIBRATION_FILE))
     {
-        Serial.println("SPIFFS: Getting calibration.");
+        Serial.println("SPIFFS: Getting calibration file.");
         File f = SPIFFS.open(CALIBRATION_FILE, "r");
         if (f)
         {
@@ -29,6 +31,10 @@ void  touch_calibrate(TFT_eSPI *tft, bool forceCalibrationFlag)
             }
             f.close();
         }
+    }
+    else
+    {
+        Serial.println("SPIFFS: calibration files does not exist.");
     }
 
     if (calDataOK && !forceCalibrationFlag)

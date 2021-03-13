@@ -1,14 +1,38 @@
 /*
+  QuoteBot
+  Reuben Strangelove
+  Spring 2021
 
-  SpotClock3... QuoteBot...
+  Fetch latest stock quotes and display the data on a graphical display.
 
-  Phase: development.
+  MCU:
+    ESP32 (ESP32 DevKitV1)
+  
+  TFT:
+    320*240 touch TFT ILI9488 (Brand: HiLetGo) with SD card slot.
+  
+  NeoPixels:
+    4x4 WS2812b LED matrix.
+
+ Phase: 
+  Development.
+ 
 
   TODO:
 
   determine market hours for matrix... and other possible indicators?
   determine weekend hours for price color change to magenta.
     after hours API halt.
+
+    
+    // get market holidays
+    https://cloud.iexapis.com/stable/ref-data/us/dates/holiday/next?token=pk_967cbde31f9247b38d646068f3fb6a30
+
+  History:
+
+  VERSION   AUTHOR      DATE        NOTES
+  =============================================================================
+  0.0.0     ReubenStr   2021/13/3   Development phase.
 
 
 */
@@ -22,8 +46,9 @@
 #include <HTTPClient.h>
 #include "time.h"
 #include <Adafruit_NeoPixel.h>
-#include "utilities.h"  // Local
-#include "tftMethods.h" // Local
+#include "utilities.h"  // Local.
+#include "tftMethods.h" // Local.
+#include "main.h"       // Local.
 
 #define ARDUINOJSON_USE_LONG_LONG 1
 #include <ArduinoJson.h>
@@ -31,10 +56,11 @@
 // Pins.
 #define PIN_LCD_BACKLIGHT_PWM 21
 #define PIN_SD_CHIP_SELECT 15
-#define PIN_LED_NEOPIXEL_MATRIX 12
+#define PIN_LED_NEOPIXEL_MATRIX 27
 
 // GLCD.
 TFT_eSPI tft = TFT_eSPI();
+Adafruit_NeoPixel matrix = Adafruit_NeoPixel(16, PIN_LED_NEOPIXEL_MATRIX, NEO_GRB + NEO_KHZ800);
 
 // Time.
 struct tm timeinfo;
@@ -42,115 +68,15 @@ const char *ntpServer = "pool.ntp.org";
 const long gmtOffset_sec = -5 * 60 * 60;
 const int daylightOffset_sec = 3600;
 
-// WiFi.
 const unsigned long wifiTimeoutUntilNewScan = 60000; // milliseconds.
-struct WifiCredentials
-{
-  String ssid;
-  String password;
-};
-
 const char *parametersFilePath = "/parameters.json";
 unsigned int symbolSelect = 0;
-
-// Neopixel Matrix.
-Adafruit_NeoPixel matrix = Adafruit_NeoPixel(16, PIN_LED_NEOPIXEL_MATRIX, NEO_GRB + NEO_KHZ800);
-
-// Misc.
 const float peRatioNA = 0.0;
-
-// API.
 const String errorUnknownSymbol = "Uknown symbol";
-
-// Structs.
-struct SymbolData
-{
-  String symbol;
-  String companyName;
-  float openPrice;
-  float currentPrice;
-  float change;
-  float changePercent;
-  float peRatio;
-  float week52High;
-  float week52Low;
-  unsigned long long lastUpdate;
-  bool isValid = true;
-  String errorString;
-};
-
-struct Api
-{
-  String provider;
-  String key;
-  int maxRequestsPerMinute;
-};
-struct Display
-{
-  int nextSymbolDelay;
-  int brightnessMax;
-  int brightnessMin;
-  int dimStartHour;
-  int dimEndHour;
-};
-struct Matrix
-{
-  String marketHoursPattern;
-  String afterHoursPattern;
-};
-
-struct System
-{
-  String timeZone;
-};
-
-struct Parameters
-{
-  std::vector<SymbolData> symbolData;
-  std::vector<WifiCredentials> wifiCredentials;
-  Api api;
-  Display display;
-  Matrix matrix;
-  System system;
-
-} parameters;
-
-enum class LabelsIds
-{
-  Wifi,
-  SD,
-  Api,
-  Clock
-
-};
-
-struct Status
-{
-  bool wifi;
-  bool sd;
-  bool api;
-  bool time;
-  bool symbolLocked;
-  bool requestInProgess;
-
-  bool operator!=(Status const &s)
-  {
-    return (wifi != s.wifi ||
-            sd != s.sd ||
-            api != s.api ||
-            time != s.time ||
-            symbolLocked != s.symbolLocked ||
-            requestInProgess != s.requestInProgess);
-  }
-
-} status;
-
-enum class ErrorIDs
-{
-  SdFailed,
-  ParametersFailed,
-  InvalidApiKey
-};
+Parameters parameters;
+Status status;
+MarketState marketState;
+bool isMarketHoliday = false;
 
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
@@ -276,6 +202,8 @@ bool GetParametersFromSDCard()
   parameters.api.provider = doc["api"]["apiProvider"].as<String>();
   parameters.api.key = doc["api"]["apiKey"].as<String>();
   parameters.api.maxRequestsPerMinute = doc["api"]["apiMaxRequestsPerMinute"].as<int>();
+  parameters.market.fetchPreMarketData = doc["market"]["fetchPreMarketData"].as<int>();
+  parameters.market.fetchAfterMarketData = doc["market"]["fetchAfterMarketData"].as<int>();
   parameters.display.nextSymbolDelay = doc["display"]["nextSymbolDelay"].as<int>();
   parameters.display.brightnessMax = doc["display"]["brightnessMax"].as<int>();
   parameters.display.brightnessMin = doc["display"]["brightnessMin"].as<int>();
@@ -310,16 +238,15 @@ void DisplayIndicator(String string, int x, int y, uint16_t color)
 
 void UpdateIndicators(bool forceUpdate = false)
 {
+  char buf[12];
+  int y = 217;
   static Status previousStatus;
   if (previousStatus != status || forceUpdate)
   {
     previousStatus = status;
 
-    char buf[12];
     sprintf(buf, "%02u:%02u:%02u", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
 
-    //String timeString = String(timeinfo.tm_hour) + ":" + String(timeinfo.tm_min) + ":" + String(timeinfo.tm_sec);
-    int y = 217;
     DisplayIndicator("SD", 25, y, status.sd ? TFT_GREEN : TFT_RED);
     DisplayIndicator("WIFI", 75, y, status.wifi ? TFT_GREEN : TFT_RED);
     DisplayIndicator("API", 130, y, status.api ? TFT_GREEN : TFT_RED);
@@ -351,7 +278,7 @@ void DisplayStockData(SymbolData symbolData)
   if (symbolData.isValid)
   {
 
-    // Compant name.
+    // Company name.
     tft.setTextSize(2);
     tft.setTextDatum(TL_DATUM);
     String name = symbolData.companyName;
@@ -373,17 +300,18 @@ void DisplayStockData(SymbolData symbolData)
     //////////////////////////////////////////////////////
     tft.setTextSize(6);
     tft.setTextDatum(TC_DATUM);
-    if (symbolData.change < 0)
+
+    if (marketState == MarketState::Holiday || marketState == MarketState::Weekend)
+    {
+      tft.setTextColor(TFT_MAGENTA, TFT_BLACK);
+    }
+    else if (symbolData.change < 0)
     {
       tft.setTextColor(TFT_RED, TFT_BLACK);
     }
     else if (symbolData.change > 0)
     {
       tft.setTextColor(TFT_GREEN, TFT_BLACK);
-    }
-    else
-    {
-      tft.setTextColor(TFT_MAGENTA, TFT_BLACK);
     }
     tft.setTextPadding(tft.textWidth("12345.78"));
 
@@ -529,13 +457,12 @@ bool GetSymbolDataFromAPI(SymbolData *symbolData)
 
   symbolData->companyName = doc["companyName"].as<String>();
   symbolData->openPrice = doc["previousClose"].as<float>();
-
   symbolData->change = doc["change"].as<float>();
   symbolData->changePercent = doc["changePercent"].as<float>();
   symbolData->week52High = doc["week52High"].as<float>();
   symbolData->week52High = doc["week52High"].as<float>();
   symbolData->week52Low = doc["week52Low"].as<float>();
-  symbolData->lastUpdate = doc["iexLastUpdated"].as<long long>();
+  symbolData->lastUpdate = doc["latestUpdate"].as<long long>();
 
   // OTC stocks have different price locations. (?)
   if (doc["iexRealtimePrice"].is<float>())
@@ -559,40 +486,79 @@ bool GetSymbolDataFromAPI(SymbolData *symbolData)
   return true;
 }
 
+void GetMarketState(tm currentTime, MarketState *ms)
+{
+  if (isMarketHoliday) // Market holiday.
+  {
+    *ms = MarketState::Holiday;
+  }
+  else if (timeinfo.tm_wday == 0 || timeinfo.tm_wday == 0) // Sunday or Saturday.
+  {
+    *ms = MarketState::Weekend;
+  }
+  else
+  {
+    if (isTimeBetweenTimes(timeinfo.tm_hour, timeinfo.tm_min, 4, 0, 9, 29)) // Pre Market hours.
+    {
+      *ms = MarketState::PreHours;
+    }
+    else if (isTimeBetweenTimes(timeinfo.tm_hour, timeinfo.tm_min, 9, 30, 15, 59)) // Market hours.
+    {
+      *ms = MarketState::MarketHours;
+    }
+    else if (isTimeBetweenTimes(timeinfo.tm_hour, timeinfo.tm_min, 16, 0, 22, 0)) // After market hours.
+    {
+      *ms = MarketState::AfterHours;
+    }
+    else
+    {
+      *ms = MarketState::Closed;
+    }
+  }
+}
+
+// Executed as a RTOS task.
 void GetSymbolData(void *)
 {
   static unsigned long start = millis();
 
   while (1)
   {
-    if (millis() - start > 2000)
+
+    if (millis() - start > 2000) // TODO: change to API per min calc provided user param
     {
       start = millis();
-      status.requestInProgess = true;
 
-      // Get index symbol with oldest data.
-      int selectedIndex = 0;
-      for (int i = 0; i < parameters.symbolData.size(); i++)
+      if ((marketState == MarketState::PreHours && parameters.market.fetchPreMarketData) ||
+          (marketState == MarketState::MarketHours) ||
+          (marketState == MarketState::AfterHours && parameters.market.fetchAfterMarketData))      
       {
-        if (parameters.symbolData[i].lastUpdate > parameters.symbolData[selectedIndex].lastUpdate && parameters.symbolData[i].isValid)
+        status.requestInProgess = true;
+
+        // Get index symbol with oldest data.
+        int selectedIndex = 0;
+        for (int i = 0; i < parameters.symbolData.size(); i++)
         {
-          selectedIndex = i;
+          if (parameters.symbolData[i].lastUpdate > parameters.symbolData[selectedIndex].lastUpdate && parameters.symbolData[i].isValid)
+          {
+            selectedIndex = i;
+          }
         }
-      }
 
-      Serial.printf("API: Requesting data for symbol: %s\n", parameters.symbolData[selectedIndex].symbol.c_str());
+        Serial.printf("API: Requesting data for symbol: %s\n", parameters.symbolData[selectedIndex].symbol.c_str());
 
-      if (parameters.api.provider.equalsIgnoreCase("IEXCLOUD"))
-      {
-        status.api = GetSymbolDataFromAPI(&parameters.symbolData[selectedIndex]);
-      }
-      else
-      {
-        Serial.printf("API: Error, unknown API provider: %s\n", parameters.api.provider.c_str());
-        status.api = false;
-      }
+        if (parameters.api.provider.equalsIgnoreCase("IEXCLOUD"))
+        {
+          status.api = GetSymbolDataFromAPI(&parameters.symbolData[selectedIndex]);
+        }
+        else
+        {
+          Serial.printf("API: Error, unknown API provider: %s\n", parameters.api.provider.c_str());
+          status.api = false;
+        }
 
-      status.requestInProgess = false;
+        status.requestInProgess = false;
+      }
     }
   }
 
@@ -609,7 +575,7 @@ void CheckTouchScreen()
 
   if (millis() - touchDebounceMillis > touchDebounceDelay)
   {
-    if (tft.getTouch(&x, &y, 40))
+    if (tft.getTouch(&x, &y, 64))
     {
       touchDebounceMillis = millis();
 
@@ -692,8 +658,6 @@ bool GetTime()
     return false;
   }
 
-  UpdateIndicators(true);
-
   return true;
 }
 
@@ -714,11 +678,11 @@ void setup()
 
   tft.init();
   delay(50);
-  tft.setRotation(3);
+  tft.setRotation(1);
   delay(50);
   tft.fillScreen(TFT_BLACK);
 
-  touch_calibrate(&tft, false);
+  CheckTouchCalibration(&tft, false);
 
   if (InitSDCard())
   {
@@ -751,6 +715,8 @@ void setup()
 void loop()
 {
   static unsigned int previousSymbolSelect;
+
+  GetMarketState(timeinfo, &marketState);
 
   UpdateNeoPixelMatrix();
 
@@ -805,5 +771,6 @@ void loop()
   {
     startGetTime = millis();
     status.time = GetTime();
+    UpdateIndicators(true);
   }
 }
