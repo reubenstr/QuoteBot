@@ -13,16 +13,16 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include "time.h"
-//#include <TimeLib.h>
+#include <Adafruit_NeoPixel.h>
+#include "utilities.h" // Local
 
 #define ARDUINOJSON_USE_LONG_LONG 1
 #include <ArduinoJson.h>
 
-#include "utilities.h" // Local
-
 // Pins.
 #define PIN_LCD_BACKLIGHT_PWM 21
 #define PIN_SD_CHIP_SELECT 15
+#define PIN_LED_NEOPIXEL_MATRIX 12
 
 // GLCD.
 TFT_eSPI tft = TFT_eSPI();
@@ -45,6 +45,9 @@ struct WifiCredentials
 const char *parametersFilePath = "/parameters.json";
 unsigned int symbolSelect = 0;
 
+// Neopixel Matrix.
+Adafruit_NeoPixel matrix = Adafruit_NeoPixel(16, PIN_LED_NEOPIXEL_MATRIX, NEO_GRB + NEO_KHZ800);
+
 struct SymbolData
 {
   String symbol;
@@ -60,19 +63,40 @@ struct SymbolData
   String errorString;
 };
 
-struct Parameters
+struct Api
 {
-  std::vector<SymbolData> symbolData;
-  std::vector<WifiCredentials> wifiCredentials;
-  String apiProvider;
-  String apiKey;
-  String timeZone;
-  int apiMaxRequestsPerMinute;
+  String provider;
+  String key;
+  int maxRequestsPerMinute;
+};
+struct Display
+{
   int nextSymbolDelay;
   int brightnessMax;
   int brightnessMin;
   int dimStartHour;
   int dimEndHour;
+};
+struct Matrix
+{
+  String marketHoursPattern;
+  String afterHoursPattern;
+};
+
+struct System
+{
+  String timeZone;
+};
+
+struct Parameters
+{
+  std::vector<SymbolData> symbolData;
+  std::vector<WifiCredentials> wifiCredentials;
+  Api api;
+  Display display;
+  Matrix matrix;
+  System system;
+
 } parameters;
 
 enum class LabelsIds
@@ -111,6 +135,9 @@ enum class ErrorIDs
   ParametersFailed
 };
 
+///////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
+
 void Error(ErrorIDs errorId)
 {
   tft.setTextSize(4);
@@ -132,6 +159,21 @@ void Error(ErrorIDs errorId)
 
   while (1)
     ;
+}
+
+void UpdateNeoPixelMatrix()
+{
+
+  for (int i = 0; i < matrix.numPixels(); i++)
+  {
+    if (random(0, 2) == 0)
+
+      matrix.setPixelColor(i, matrix.Color(255, 0, 0));
+    else
+      matrix.setPixelColor(i, matrix.Color(0, 255, 0));
+  }
+
+  matrix.show();
 }
 
 bool InitSDCard()
@@ -195,21 +237,23 @@ bool GetParametersFromSDCard()
     parameters.wifiCredentials.push_back(wC);
   }
 
-  parameters.timeZone = doc["timeZone"].as<String>();
-  parameters.apiProvider = doc["apiProvider"].as<String>();
-  parameters.apiKey = doc["apiKey"].as<String>();
-  parameters.apiMaxRequestsPerMinute = doc["apiMaxRequestsPerMinute"].as<int>();
-  parameters.nextSymbolDelay = doc["nextSymbolDelay"].as<int>();
-  parameters.brightnessMax = doc["brightnessMax"].as<int>();
-  parameters.brightnessMin = doc["brightnessMin"].as<int>();
-  parameters.dimStartHour = doc["dimStartHour"].as<int>();
-  parameters.dimEndHour = doc["dimEndHour"].as<int>();
+  parameters.api.provider = doc["api"]["apiProvider"].as<String>();
+  parameters.api.key = doc["api"]["apiKey"].as<String>();
+  parameters.api.maxRequestsPerMinute = doc["api"]["apiMaxRequestsPerMinute"].as<int>();
+  parameters.display.nextSymbolDelay = doc["display"]["nextSymbolDelay"].as<int>();
+  parameters.display.brightnessMax = doc["display"]["brightnessMax"].as<int>();
+  parameters.display.brightnessMin = doc["display"]["brightnessMin"].as<int>();
+  parameters.display.dimStartHour = doc["display"]["dimStartHour"].as<int>();
+  parameters.display.dimEndHour = doc["display"]["dimEndHour"].as<int>();
+  parameters.matrix.marketHoursPattern = doc["matrix"]["marketHoursPattern"].as<int>();
+  parameters.matrix.afterHoursPattern = doc["matrix"]["afterHoursPattern"].as<int>();
+  parameters.system.timeZone = doc["system"]["timeZone"].as<String>();
 
   // Conform parameters into acceptable ranges.
 
-  if (parameters.nextSymbolDelay < 1)
+  if (parameters.display.nextSymbolDelay < 1)
   {
-    parameters.nextSymbolDelay = 1;
+    parameters.display.nextSymbolDelay = 1;
   }
 
   file.close();
@@ -309,12 +353,12 @@ void UpdateIndicators(bool forceUpdate = false)
 
     //String timeString = String(timeinfo.tm_hour) + ":" + String(timeinfo.tm_min) + ":" + String(timeinfo.tm_sec);
     int y = 217;
-    DisplayIndicator("SD", 10, y, status.sd ? TFT_GREEN : TFT_RED);
-    DisplayIndicator("WIFI", 45, y, status.wifi ? TFT_GREEN : TFT_RED);
-    DisplayIndicator("API", 100, y, status.api ? TFT_GREEN : TFT_RED);
-    DisplayIndicator("L", 155, y, status.symbolLocked ? TFT_BLUE : TFT_BLACK);
-    DisplayIndicator("R", 190, y, status.requestInProgess ? TFT_BLUE : TFT_BLACK);
-    DisplayIndicator(String(buf), 215, y, status.time ? TFT_GREEN : TFT_RED);
+    DisplayIndicator("SD", 40, y, status.sd ? TFT_GREEN : TFT_RED);
+    DisplayIndicator("WIFI", 80, y, status.wifi ? TFT_GREEN : TFT_RED);
+    DisplayIndicator("API", 150, y, status.api ? TFT_GREEN : TFT_RED);
+    DisplayIndicator("L", 165, y, status.symbolLocked ? TFT_BLUE : TFT_BLACK);
+    DisplayIndicator("R", 200, y, status.requestInProgess ? TFT_BLUE : TFT_BLACK);
+    DisplayIndicator(String(buf), 270, y, status.time ? TFT_GREEN : TFT_RED);
   }
 }
 
@@ -417,11 +461,15 @@ void DisplayStockData(SymbolData symbolData)
 
   // Extra data.
   //////////////////////////////////////////////////////
+
   tft.setTextSize(2);
   tft.setTextColor(TFT_BLUE, TFT_BLACK);
+  tft.setTextPadding(0);
+  tft.drawString("Update", 265, 160);
+  tft.drawString("P/E", 50, 160);
+  tft.drawString("Open", 150, 160);
 
   // PE.
-  tft.drawString("P/E", 50, 160);
   if (symbolData.peRatio == peRatioNA)
   {
     sprintf(buf, "N/A");
@@ -433,22 +481,15 @@ void DisplayStockData(SymbolData symbolData)
   tft.setTextPadding(tft.textWidth("-123.56"));
   tft.drawString(buf, 50, 182);
 
-  //sprintf(buf, "Open: %3.2f", stockData.openPrice);
-  //tft.drawString(buf, 10, 175);
   // Open.
   tft.setTextPadding(tft.textWidth("12345.78"));
   sprintf(buf, "%3.2f", symbolData.openPrice);
-  tft.drawString("Open", 150, 160);
   tft.drawString(buf, 150, 182);
 
   // Update.
   tft.setTextPadding(0);
-  // http://www.cplusplus.com/reference/ctime/tm/
   time_t rawtime(symbolData.lastUpdate);
-  struct tm *tInfo(localtime(&rawtime)); 
-  sprintf(buf, "%02u:%02u:%02u", tInfo->tm_hour, tInfo->tm_min, tInfo->tm_sec);
-  //sprintf(buf, "%3.2f", symbolData.lastUpdate);
-  tft.drawString("Update", 265, 160);
+  sprintf(buf, "%02u:%02u:%02u", localtime(&rawtime)->tm_hour, localtime(&rawtime)->tm_min, localtime(&rawtime)->tm_sec);
   tft.drawString(buf, 265, 182);
   //////////////////////////////////////////////////////
 }
@@ -468,10 +509,10 @@ bool GetSymbolDataFromAPI(SymbolData *symbolData)
   http.begin(host);
   int httpCode = http.GET();
 
+  Serial.printf("WIFI: HTTP code: %i\n", httpCode);
+
   if (httpCode > 0)
   {
-    Serial.print("WIFI: HTTP code: ");
-    Serial.println(httpCode);
     payload = http.getString();
     Serial.println("API: [RESPONSE]");
     Serial.println(payload);
@@ -571,12 +612,13 @@ void GetSymbolData(void *)
 
       Serial.printf("API: Requesting data for symbol: %s\n", parameters.symbolData[selectedIndex].symbol.c_str());
 
-      if (parameters.apiProvider.equalsIgnoreCase("IEXCLOUD"))
+      if (parameters.api.provider.equalsIgnoreCase("IEXCLOUD"))
       {
         status.api = GetSymbolDataFromAPI(&parameters.symbolData[selectedIndex]);
       }
       else
       {
+        Serial.printf("API: Error, unknown API provider: %s\n", parameters.api.provider);
         status.api = false;
       }
 
@@ -749,7 +791,7 @@ void loop()
   UpdateIndicators();
 
   // Increment selected symbol.
-  if (millis() - startSymbolSelect > parameters.nextSymbolDelay * 1000)
+  if (millis() - startSymbolSelect > parameters.display.nextSymbolDelay * 1000)
   {
     startSymbolSelect = millis();
     if (!status.symbolLocked)
