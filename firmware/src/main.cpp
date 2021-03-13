@@ -1,6 +1,8 @@
 /*
 
+  SpotClock3... QuoteBot...
 
+  Phase: development.
 
 
 */
@@ -14,7 +16,8 @@
 #include <HTTPClient.h>
 #include "time.h"
 #include <Adafruit_NeoPixel.h>
-#include "utilities.h" // Local
+#include "utilities.h"  // Local
+#include "tftMethods.h" // Local
 
 #define ARDUINOJSON_USE_LONG_LONG 1
 #include <ArduinoJson.h>
@@ -27,15 +30,13 @@
 // GLCD.
 TFT_eSPI tft = TFT_eSPI();
 
-const float peRatioNA = 0.0;
-
 // Time.
 struct tm timeinfo;
 const char *ntpServer = "pool.ntp.org";
 const long gmtOffset_sec = -5 * 60 * 60;
 const int daylightOffset_sec = 3600;
 
-// WiFi
+// WiFi.
 struct WifiCredentials
 {
   String ssid;
@@ -48,6 +49,13 @@ unsigned int symbolSelect = 0;
 // Neopixel Matrix.
 Adafruit_NeoPixel matrix = Adafruit_NeoPixel(16, PIN_LED_NEOPIXEL_MATRIX, NEO_GRB + NEO_KHZ800);
 
+// Misc.
+const float peRatioNA = 0.0;
+
+// API.
+const String errorUnknownSymbol = "Uknown symbol";
+
+// Structs.
 struct SymbolData
 {
   String symbol;
@@ -60,6 +68,7 @@ struct SymbolData
   float week52High;
   float week52Low;
   unsigned long long lastUpdate;
+  bool isValid = true;
   String errorString;
 };
 
@@ -163,17 +172,32 @@ void Error(ErrorIDs errorId)
 
 void UpdateNeoPixelMatrix()
 {
-
-  for (int i = 0; i < matrix.numPixels(); i++)
+  static unsigned long start = millis();
+  int delay = 1000;
+  if (millis() - start > delay)
   {
-    if (random(0, 2) == 0)
+    start = millis();
 
-      matrix.setPixelColor(i, matrix.Color(255, 0, 0));
-    else
-      matrix.setPixelColor(i, matrix.Color(0, 255, 0));
+    if (parameters.matrix.marketHoursPattern.equalsIgnoreCase("TOP16"))
+    {
+    }
+    else if (parameters.matrix.marketHoursPattern.equalsIgnoreCase("REDGREENCHECKER"))
+    {
+    }
+    else if (parameters.matrix.marketHoursPattern.equalsIgnoreCase("RAINBOW"))
+    {
+    }
+
+    for (int i = 0; i < matrix.numPixels(); i++)
+    {
+      if (random(0, 2) == 0)
+        matrix.setPixelColor(i, matrix.Color(255, 0, 0));
+      else
+        matrix.setPixelColor(i, matrix.Color(0, 255, 0));
+    }
+
+    matrix.show();
   }
-
-  matrix.show();
 }
 
 bool InitSDCard()
@@ -260,84 +284,15 @@ bool GetParametersFromSDCard()
   return true;
 }
 
-// Solution provided by : https://github.com/Bodmer/TFT_eSPI/issues/6
-void charBounds(char c, int16_t *x, int16_t *y,
-                int16_t *minx, int16_t *miny, int16_t *maxx, int16_t *maxy)
-{
-  if (c == '\n')
-  {                         // Newline?
-    *x = 0;                 // Reset x to zero,
-    *y += tft.textsize * 8; // advance y one line
-                            // min/max x/y unchaged -- that waits for next 'normal' character
-  }
-  else if (c != '\r')
-  { // Normal char; ignore carriage returns
-    if (/*wrap*/ false && ((*x + tft.textsize * 6) > tft.width()))
-    {                         // Off right?
-      *x = 0;                 // Reset x to zero,
-      *y += tft.textsize * 8; // advance y one line
-    }
-    int x2 = *x + tft.textsize * 6 - 1, // Lower-right pixel of char
-        y2 = *y + tft.textsize * 8 - 1;
-    if (x2 > *maxx)
-      *maxx = x2; // Track max x, y
-    if (y2 > *maxy)
-      *maxy = y2;
-    if (*x < *minx)
-      *minx = *x; // Track min x, y
-    if (*y < *miny)
-      *miny = *y;
-    *x += tft.textsize * 6; // Advance x one char
-  }
-}
-
-// Solution provided by : https://github.com/Bodmer/TFT_eSPI/issues/6
-void getTextBounds(const char *str, int16_t x, int16_t y,
-                   int16_t *x1, int16_t *y1, uint16_t *w, uint16_t *h)
-{
-  uint8_t c; // Current character
-
-  *x1 = x;
-  *y1 = y;
-  *w = *h = 0;
-
-  int16_t minx = tft.width(), miny = tft.width(), maxx = -1, maxy = -1;
-
-  while ((c = *str++))
-    charBounds(c, &x, &y, &minx, &miny, &maxx, &maxy);
-
-  if (maxx >= minx)
-  {
-    *x1 = minx;
-    *w = maxx - minx + 1;
-  }
-  if (maxy >= miny)
-  {
-    *y1 = miny;
-    *h = maxy - miny + 1;
-  }
-}
-
 void DisplayIndicator(String string, int x, int y, uint16_t color)
 {
-  /*
-  int16_t x1, y1;
-  uint16_t w, h;
-  const int offset = 2;
   tft.setTextSize(2);
-  getTextBounds(string.c_str(), x, y, &x1, &y1, &w, &h);
-  tft.fillRect(x - offset, y - offset, w + offset, h + offset, color);
-  tft.setCursor(x, y);
-  tft.setTextPadding(5);
-  tft.setTextColor(TFT_BLACK, color);
-  tft.print(string);
-  */
-
-  tft.setTextSize(2);
-  tft.setTextDatum(CC_DATUM);
+  tft.setTextDatum(TC_DATUM);
   tft.setTextColor(TFT_BLACK, color);
   int padding = tft.textWidth(string);
-  tft.setTextPadding(padding + 10);
+  tft.setTextPadding(padding + 6);
+  tft.drawFastHLine(x - ((padding + 6) / 2), y - 1, padding + 6, color);
+  tft.drawFastHLine(x - ((padding + 6) / 2), y - 2, padding + 6, color);
   tft.drawString(string.c_str(), x, y);
 }
 
@@ -353,153 +308,150 @@ void UpdateIndicators(bool forceUpdate = false)
 
     //String timeString = String(timeinfo.tm_hour) + ":" + String(timeinfo.tm_min) + ":" + String(timeinfo.tm_sec);
     int y = 217;
-    DisplayIndicator("SD", 40, y, status.sd ? TFT_GREEN : TFT_RED);
-    DisplayIndicator("WIFI", 80, y, status.wifi ? TFT_GREEN : TFT_RED);
-    DisplayIndicator("API", 150, y, status.api ? TFT_GREEN : TFT_RED);
-    DisplayIndicator("L", 165, y, status.symbolLocked ? TFT_BLUE : TFT_BLACK);
-    DisplayIndicator("R", 200, y, status.requestInProgess ? TFT_BLUE : TFT_BLACK);
-    DisplayIndicator(String(buf), 270, y, status.time ? TFT_GREEN : TFT_RED);
+    DisplayIndicator("SD", 25, y, status.sd ? TFT_GREEN : TFT_RED);
+    DisplayIndicator("WIFI", 75, y, status.wifi ? TFT_GREEN : TFT_RED);
+    DisplayIndicator("API", 130, y, status.api ? TFT_GREEN : TFT_RED);
+    DisplayIndicator("L", 165, y, status.symbolLocked ? TFT_BLUE : 0x0001);
+    DisplayIndicator("R", 190, y, status.requestInProgess ? TFT_BLUE : 0x0001);
+    DisplayIndicator(String(buf), 260, y, status.time ? TFT_GREEN : TFT_RED);
   }
 }
 
 void DisplayStockData(SymbolData symbolData)
 {
   char buf[32];
-  const int indent = 10;
-
   tft.setTextFont(0);
 
-  //tft.setFreeFont(&FreeMono9pt7b);
-
   // Frame.
+  // TODO: move.
   tft.drawRect(0, 0, tft.width(), tft.height(), TFT_WHITE);
   tft.drawFastHLine(0, 35, tft.width(), TFT_WHITE);
   tft.drawFastHLine(0, 205, tft.width(), TFT_WHITE);
-  tft.drawFastVLine(105, 0, 35, TFT_WHITE);
+  tft.drawFastVLine(100, 0, 35, TFT_WHITE);
 
-  //////////////////////////////////////////////////////
-  // Symbol.
-  tft.setTextSize(3);
-  tft.setTextDatum(TC_DATUM);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.setTextPadding(tft.textWidth("12345"));
-  tft.drawString(symbolData.symbol, 50, 7);
+ Serial.println(symbolData.errorString);
+  Serial.println(symbolData.errorString);
+   Serial.println(symbolData.errorString);
+  Serial.println(symbolData.errorString);
 
-  // Name.
-  tft.setTextSize(2);
-  tft.setTextDatum(TL_DATUM);
-  String name = symbolData.companyName;
-  if (symbolData.companyName.length() > 15)
+  if (symbolData.isValid)
   {
-    // name = stockData.companyName.substring(0, 9);
-    tft.drawString(symbolData.companyName.substring(0, 14), indent + 110, 12);
-    tft.drawPixel(300, 25, TFT_WHITE);
-    tft.drawPixel(303, 25, TFT_WHITE);
-    tft.drawPixel(306, 25, TFT_WHITE);
+    //////////////////////////////////////////////////////
+    // Symbol.
+    tft.setTextSize(3);
+    tft.setTextDatum(TC_DATUM);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setTextPadding(tft.textWidth("12345"));
+    tft.drawString(symbolData.symbol, 52, 7);
+
+    // Name.
+    tft.setTextSize(2);
+    tft.setTextDatum(TL_DATUM);
+    String name = symbolData.companyName;
+    if (symbolData.companyName.length() > 16)
+    {
+      tft.drawString(symbolData.companyName.substring(0, 15), 115, 12);
+      tft.drawPixel(297, 25, TFT_WHITE);
+      tft.drawPixel(300, 25, TFT_WHITE);
+      tft.drawPixel(303, 25, TFT_WHITE);
+    }
+    else
+    {
+      tft.drawString(symbolData.companyName, 115, 12);
+    }
+    //////////////////////////////////////////////////////
+
+    // Price.
+    //////////////////////////////////////////////////////
+    tft.setTextSize(6);
+    tft.setTextDatum(TC_DATUM);
+    if (symbolData.change < 0)
+    {
+      tft.setTextColor(TFT_RED, TFT_BLACK);
+    }
+    else if (symbolData.change > 0)
+    {
+      tft.setTextColor(TFT_GREEN, TFT_BLACK);
+    }
+    else
+    {
+      tft.setTextColor(TFT_MAGENTA, TFT_BLACK);
+    }
+    tft.setTextPadding(tft.textWidth("12345.78"));
+
+    sprintf(buf, "%4.2f", symbolData.currentPrice);
+    tft.drawString(buf, tft.height() / 2, 55);
+
+    // Change.
+    tft.setTextSize(3);
+    tft.setTextPadding(tft.textWidth("123.56"));
+    sprintf(buf, "%1.2f", symbolData.change);
+    tft.drawString(buf, 90, 115);
+
+    tft.setTextPadding(tft.textWidth("-2345.67"));
+    sprintf(buf, "%3.2f%%", symbolData.changePercent);
+    tft.drawString(buf, tft.height() - 90, 115);
+    //////////////////////////////////////////////////////
+
+    // 52 week
+    //////////////////////////////////////////////////////
+    static int x52;
+    int y = 146;
+    tft.fillRect(x52, y, 5, 10, TFT_BLACK);
+    x52 = mapFloat(symbolData.currentPrice, symbolData.week52Low, symbolData.week52High, 20, tft.height() - 20);
+    tft.drawLine(20, y + 5, tft.height() - 20, y + 5, TFT_YELLOW);
+    tft.fillRect(x52, y, 5, 10, TFT_YELLOW);
+    //////////////////////////////////////////////////////
+
+    // Extra data.
+    //////////////////////////////////////////////////////
+
+    tft.setTextSize(2);
+    tft.setTextColor(TFT_BLUE, TFT_BLACK);
+    tft.setTextPadding(0);
+    tft.drawString("Update", 260, 160);
+    tft.drawString("P/E", 50, 160);
+    tft.drawString("Open", 150, 160);
+
+    // PE.
+    if (symbolData.peRatio == peRatioNA)
+    {
+      sprintf(buf, "N/A");
+    }
+    else
+    {
+      sprintf(buf, "%3.2f", symbolData.peRatio);
+    }
+    tft.setTextPadding(tft.textWidth("-123.56"));
+    tft.drawString(buf, 50, 182);
+
+    // Open.
+    tft.setTextPadding(tft.textWidth("12345.78"));
+    sprintf(buf, "%3.2f", symbolData.openPrice);
+    tft.drawString(buf, 150, 182);
+
+    // Update.
+    tft.setTextPadding(0);
+    time_t rawtime(symbolData.lastUpdate);
+    sprintf(buf, "%02u:%02u:%02u", localtime(&rawtime)->tm_hour, localtime(&rawtime)->tm_min, localtime(&rawtime)->tm_sec);
+    tft.drawString(buf, 260, 182);
+    //////////////////////////////////////////////////////
   }
   else
   {
-    tft.drawString(symbolData.companyName, indent + 110, 12);
-  }
-  //////////////////////////////////////////////////////
-
-  // Price.
-
-  //////////////////////////////////////////////////////
-  tft.setTextSize(6);
-  tft.setTextDatum(TC_DATUM);
-  if (symbolData.change < 0)
-  {
+    tft.fillRect(1, 36, tft.width() - 2, 205 - 36 - 1, TFT_BLACK);
+    tft.setTextSize(3);
+    tft.setTextDatum(TC_DATUM);
     tft.setTextColor(TFT_RED, TFT_BLACK);
+    tft.drawString("Invalid", tft.width() / 2, 100);
+    tft.drawString("Symbol", tft.width() / 2, 150);
   }
-  else if (symbolData.change > 0)
-  {
-    tft.setTextColor(TFT_GREEN, TFT_BLACK);
-  }
-  else
-  {
-    tft.setTextColor(TFT_MAGENTA, TFT_BLACK);
-  }
-  tft.setTextPadding(tft.textWidth("12345.78"));
-
-  sprintf(buf, "%4.2f", symbolData.currentPrice);
-  //int tw = tft.textWidth(String(buf));
-
-  tft.drawString(buf, tft.height() / 2, 50);
-  //tft.fillRect(1, 50, (tft.height() - tw) / 2, 45, TFT_ORANGE);
-  // tft.fillRect(tft.height() / 2 + tw / 2, 50, (tft.height() - tw) / 2 - 1, 45, TFT_ORANGE);
-
-  // Change.
-  tft.setTextSize(3);
-  tft.setTextPadding(tft.textWidth("123.56"));
-  sprintf(buf, "%1.2f", symbolData.change);
-  tft.drawString(buf, 90, 110);
-
-  // Percent change.
-  /*
-  if (symbolData.changePercent < 10)
-    sprintf(buf, "%1.2f%%", symbolData.changePercent);
-  else if (symbolData.changePercent < 100)
-    sprintf(buf, "%2.1f%%", symbolData.changePercent);
-  else
-    sprintf(buf, "%3.0f%%", symbolData.changePercent);
-    */
-  tft.setTextPadding(tft.textWidth("-2345.67"));
-  sprintf(buf, "%3.2f%%", symbolData.changePercent);
-  tft.drawString(buf, tft.height() - 90, 110);
-  //////////////////////////////////////////////////////
-
-  // 52 week
-  //////////////////////////////////////////////////////
-  static int x52;
-  int y = 143;
-  tft.fillRect(x52, y, 5, 10, TFT_BLACK);
-  x52 = mapFloat(symbolData.currentPrice, symbolData.week52Low, symbolData.week52High, 20, tft.height() - 20);
-  tft.drawLine(20, y + 5, tft.height() - 20, y + 5, TFT_YELLOW);
-  tft.fillRect(x52, y, 5, 10, TFT_YELLOW);
-  //////////////////////////////////////////////////////
-
-  // Extra data.
-  //////////////////////////////////////////////////////
-
-  tft.setTextSize(2);
-  tft.setTextColor(TFT_BLUE, TFT_BLACK);
-  tft.setTextPadding(0);
-  tft.drawString("Update", 265, 160);
-  tft.drawString("P/E", 50, 160);
-  tft.drawString("Open", 150, 160);
-
-  // PE.
-  if (symbolData.peRatio == peRatioNA)
-  {
-    sprintf(buf, "N/A");
-  }
-  else
-  {
-    sprintf(buf, "%3.2f", symbolData.peRatio);
-  }
-  tft.setTextPadding(tft.textWidth("-123.56"));
-  tft.drawString(buf, 50, 182);
-
-  // Open.
-  tft.setTextPadding(tft.textWidth("12345.78"));
-  sprintf(buf, "%3.2f", symbolData.openPrice);
-  tft.drawString(buf, 150, 182);
-
-  // Update.
-  tft.setTextPadding(0);
-  time_t rawtime(symbolData.lastUpdate);
-  sprintf(buf, "%02u:%02u:%02u", localtime(&rawtime)->tm_hour, localtime(&rawtime)->tm_min, localtime(&rawtime)->tm_sec);
-  tft.drawString(buf, 265, 182);
-  //////////////////////////////////////////////////////
 }
 
 bool GetSymbolDataFromAPI(SymbolData *symbolData)
 {
   String payload;
   //String host = "https://cloud.iexapis.com/stable/stock/" + symbolData->symbol + "/quote?token=" + parameters.apiKey;
-
-  // TEMP SANDBOX
   String host = "https://sandbox.iexapis.com/stable/stock/" + symbolData->symbol + "/quote?token=Tpk_81853d40d7084179b6e722e84f44e148";
 
   Serial.print("API: Connecting to ");
@@ -520,6 +472,27 @@ bool GetSymbolDataFromAPI(SymbolData *symbolData)
 
     if (httpCode != 200)
     {
+      // Check for endpoint error messages.
+      if (payload.equalsIgnoreCase("Unknown symbol"))
+      {
+        Serial.println("API: Error from endpoint: Unknown symbol");
+        symbolData->errorString = "Unknown symbol";
+        symbolData->isValid = false;
+        return false;
+      }
+      else if (payload.equalsIgnoreCase("Forbidden"))
+      {
+        Serial.println("API: Error from endpoint: Forbidden");
+        symbolData->errorString = "Forbidden";
+        return false;
+      }
+      else if (payload.equalsIgnoreCase("The API key provided is not valid."))
+      {
+        Serial.println("API: Error from endpoint: The API key provided is not valid.");
+        symbolData->errorString = "The API key provided is not valid.";
+        return false;
+      }
+
       return false;
     }
   }
@@ -529,20 +502,6 @@ bool GetSymbolDataFromAPI(SymbolData *symbolData)
     Serial.println(httpCode);
     symbolData->errorString = String(httpCode);
     http.end();
-    return false;
-  }
-
-  // Check for endpoint error messages.
-  if (payload.equalsIgnoreCase("Unknown symbol"))
-  {
-    Serial.print("API: Error from endpoint: Unknown symbol");
-    symbolData->errorString = "Unknown symbol";
-    return false;
-  }
-  if (payload.equalsIgnoreCase("Forbidden"))
-  {
-    Serial.print("API: Error from endpoint: Forbidden");
-    symbolData->errorString = "Forbidden";
     return false;
   }
 
@@ -604,7 +563,7 @@ void GetSymbolData(void *)
       int selectedIndex = 0;
       for (int i = 0; i < parameters.symbolData.size(); i++)
       {
-        if (parameters.symbolData[i].lastUpdate > parameters.symbolData[selectedIndex].lastUpdate)
+        if (parameters.symbolData[i].lastUpdate > parameters.symbolData[selectedIndex].lastUpdate && parameters.symbolData[i].isValid)
         {
           selectedIndex = i;
         }
@@ -618,7 +577,7 @@ void GetSymbolData(void *)
       }
       else
       {
-        Serial.printf("API: Error, unknown API provider: %s\n", parameters.api.provider);
+        Serial.printf("API: Error, unknown API provider: %s\n", parameters.api.provider.c_str());
         status.api = false;
       }
 
@@ -716,7 +675,6 @@ bool ConnectWifi()
 
 bool GetTime()
 {
-
   if (!getLocalTime(&timeinfo))
   {
     Serial.println("TIME: Failed to obtain time");
@@ -734,16 +692,18 @@ void setup()
   Serial.begin(115200);
   Serial.println(F("\nQuoteBot starting up..."));
 
+  // LCD backlight PWM.
+  ledcSetup(0, 5000, 8);
+  ledcAttachPin(PIN_LCD_BACKLIGHT_PWM, 0);
+  ledcWrite(0, 255);
+
   tft.init();
   delay(50);
   tft.setRotation(3);
   delay(50);
   tft.fillScreen(TFT_BLACK);
 
-  // LCD backlight PWM.
-  ledcSetup(0, 5000, 8);
-  ledcAttachPin(PIN_LCD_BACKLIGHT_PWM, 0);
-  ledcWrite(0, 255);
+  touch_calibrate(&tft, false);
 
   if (InitSDCard())
   {
@@ -781,16 +741,17 @@ void setup()
 
 void loop()
 {
-  static unsigned long startSymbolSelect = millis();
-  static unsigned long startDataRequest = millis();
 
   status.wifi = WiFi.status() == WL_CONNECTED;
+
+  UpdateNeoPixelMatrix();
 
   CheckTouchScreen();
 
   UpdateIndicators();
 
   // Increment selected symbol.
+  static unsigned long startSymbolSelect = millis();
   if (millis() - startSymbolSelect > parameters.display.nextSymbolDelay * 1000)
   {
     startSymbolSelect = millis();
