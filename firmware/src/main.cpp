@@ -28,10 +28,7 @@
   // get market holidays
   https://cloud.iexapis.com/stable/ref-data/us/dates/holiday/next?token=pk_967cbde31f9247b38d646068f3fb6a30
 
-  Fetch data upon startup even if market is closed.
-  
-
-
+ 
   History:
 
   VERSION   AUTHOR      DATE        NOTES
