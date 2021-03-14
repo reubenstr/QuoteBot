@@ -14,21 +14,9 @@
   NeoPixels:
     4x4 WS2812b LED matrix.
 
- Phase: 
-  Development.
- 
-
   TODO:
+    Add LED matrix effects. 
 
-  determine market hours for matrix... and other possible indicators?
-  determine weekend hours for price color change to magenta.
-  after hours API halt.
-
-    
-  // get market holidays
-  https://cloud.iexapis.com/stable/ref-data/us/dates/holiday/next?token=pk_967cbde31f9247b38d646068f3fb6a30
-
- 
   History:
 
   VERSION   AUTHOR      DATE        NOTES

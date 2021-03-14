@@ -1,0 +1,44 @@
+{
+  "wifiCredentials": [
+    {
+      "ssid": "RedSky",
+      "password": "happyredcat"
+    },
+    {
+      "ssid": "Hermes",
+      "password": "Mlx5ykch"
+    }
+  ],
+  "symbols": [
+    "AG",
+    "AXU",
+    "SAND",
+    "FFMGF",
+    "FURY",
+    "ASM",
+    "AS2M"
+  ],
+  "api": {
+    "apiProvider": "IEXCLOUD",
+    "apiKey": "YOUR_API_KEY_HERE",
+    "apiMaxRequestsPerMinute": 2
+  },
+  "market": {
+    "fetchPreMarketData": false,
+    "fetchAfterMarketData": false
+  },
+  "display": {
+    "nextSymbolDelay": 3,
+    "brightnessMax": 255,
+    "brightnessMin": 64,
+    "dimStartHour": 2000,
+    "dimEndHour": 800
+  },
+  "matrix": {
+    "marketHoursPattern": "TOP16",
+    "afterHoursPattern": "RAINBOW"
+  },
+  "system": {
+    "timeZone": "EST"
+  }
+}
