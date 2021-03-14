@@ -59,6 +59,9 @@
 #define PIN_SD_CHIP_SELECT 15
 #define PIN_LED_NEOPIXEL_MATRIX 27
 
+// Demo mode.
+// const bool demoMode = true;
+
 // GLCD.
 TFT_eSPI tft = TFT_eSPI();
 Adafruit_NeoPixel matrix = Adafruit_NeoPixel(16, PIN_LED_NEOPIXEL_MATRIX, NEO_GRB + NEO_KHZ800);
@@ -69,7 +72,7 @@ const char *ntpServer = "pool.ntp.org";
 const long gmtOffset_sec = -5 * 60 * 60;
 const int daylightOffset_sec = 3600;
 
-const unsigned long wifiTimeoutUntilNewScan = 60000; // milliseconds.
+const unsigned long wifiTimeoutUntilNewScan = 30000; // milliseconds.
 const char *parametersFilePath = "/parameters.json";
 unsigned int symbolSelect = 0;
 const float peRatioNA = 0.0;
@@ -257,17 +260,25 @@ void UpdateIndicators(bool forceUpdate = false)
   }
 }
 
-void DisplayStockData(SymbolData symbolData)
+void DisplayLayout()
 {
-  char buf[32];
-  tft.setTextFont(0);
-
   // Frame.
-  // TODO: move.
   tft.drawRect(0, 0, tft.width(), tft.height(), TFT_WHITE);
   tft.drawFastHLine(0, 35, tft.width(), TFT_WHITE);
   tft.drawFastHLine(0, 205, tft.width(), TFT_WHITE);
   tft.drawFastVLine(100, 0, 35, TFT_WHITE);
+}
+
+void DisplayBlank()
+{
+  tft.fillRect(101, 2, tft.height() - 102, 32, TFT_BLACK);        // Name area.
+  tft.fillRect(1, 36, tft.height() - 2, 205 - 36 - 1, TFT_BLACK); // Center area
+}
+
+void DisplayStockData(SymbolData symbolData)
+{
+  char buf[32];
+  tft.setTextFont(0);
 
   // Symbol.
   tft.setTextSize(3);
@@ -332,7 +343,7 @@ void DisplayStockData(SymbolData symbolData)
 
     // 52 week
     //////////////////////////////////////////////////////
-    static int x52;
+    static int x52 = 20;
     int y = 143;
     tft.fillRect(x52, y, 5, 10, TFT_BLACK);
     x52 = mapFloat(symbolData.currentPrice, symbolData.week52Low, symbolData.week52High, 20, tft.height() - 20);
@@ -377,8 +388,7 @@ void DisplayStockData(SymbolData symbolData)
   else
   {
     // Error message.
-    tft.fillRect(101, 2, tft.height() - 102, 32, TFT_BLACK);        // Name area.
-    tft.fillRect(1, 36, tft.height() - 2, 205 - 36 - 1, TFT_BLACK); // Center area.
+    DisplayBlank();
     tft.setTextSize(3);
     tft.setTextDatum(TC_DATUM);
     tft.setTextColor(TFT_RED, TFT_BLACK);
@@ -613,22 +623,25 @@ void CheckTouchScreen()
 
 bool ConnectWifi()
 {
+  char buf[128];
   int wifiCredentialsIndex = 0;
 
   while (1)
   {
-    tft.fillScreen(TFT_BLACK);
-    tft.setCursor(0, 0);
+    DisplayBlank();    
     tft.setTextSize(2);
     tft.setTextColor(TFT_GREEN);
-    tft.printf("Connecting to WiFi\n");
-    tft.printf("SSID: %s\n", parameters.wifiCredentials[wifiCredentialsIndex].ssid.c_str());
-    tft.printf("Password: %s\n", parameters.wifiCredentials[wifiCredentialsIndex].password.c_str());
-
-    Serial.printf("WIFI: Connecting to SSID: %s, with password: %s\n", parameters.wifiCredentials[wifiCredentialsIndex].ssid.c_str(), parameters.wifiCredentials[wifiCredentialsIndex].password.c_str());
+    tft.setTextDatum(TL_DATUM);
+    tft.drawString("Connecting to WiFi\n", 10, 50);
+    sprintf(buf, "SSID: %s\n", parameters.wifiCredentials[wifiCredentialsIndex].ssid.c_str());
+    tft.drawString(buf, 10, 70);
+    sprintf(buf, "Password: %s\n", parameters.wifiCredentials[wifiCredentialsIndex].password.c_str());
+    tft.drawString(buf, 10, 90);  
+    Serial.printf("\nWIFI: Connecting to SSID: %s, with password: %s\n", parameters.wifiCredentials[wifiCredentialsIndex].ssid.c_str(), parameters.wifiCredentials[wifiCredentialsIndex].password.c_str());
 
     WiFi.begin(parameters.wifiCredentials[wifiCredentialsIndex].ssid.c_str(), parameters.wifiCredentials[wifiCredentialsIndex].password.c_str());
 
+    tft.setCursor(10, 110);
     int count = 0;
     while (count++ < 10)
     {
@@ -638,14 +651,16 @@ bool ConnectWifi()
 
       if (WiFi.status() == WL_CONNECTED)
       {
-        tft.fillScreen(TFT_BLACK);
+        tft.drawString("Connected!\n", 10, 140);
+        sprintf(buf, "IP: %s\n", WiFi.localIP().toString().c_str());
+        tft.drawString(buf, 10, 160);       
         Serial.println("");
         Serial.printf("WIFI: WiFi connected to %s, device IP: %s\n", parameters.wifiCredentials[wifiCredentialsIndex].ssid.c_str(), WiFi.localIP().toString().c_str());
+        delay(1000);
+        DisplayBlank();
         return true;
       }
-    }
-
-    Serial.println("");
+    }  
 
     wifiCredentialsIndex++;
     if (wifiCredentialsIndex > parameters.wifiCredentials.size() - 1)
@@ -686,12 +701,15 @@ void setup()
   tft.setRotation(1);
   delay(50);
   tft.fillScreen(TFT_BLACK);
+  DisplayLayout();
+  UpdateIndicators(true);
 
   CheckTouchCalibration(&tft, false);
 
   if (InitSDCard())
   {
     status.sd = true;
+    UpdateIndicators();
   }
   else
   {
