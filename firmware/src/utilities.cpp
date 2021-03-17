@@ -40,3 +40,16 @@ bool isTimeBetweenTimes(int tHour, int tMin, int eHour, int eMin, int lHour, int
 {
   return hourMinToSeconds(tHour, tMin) > hourMinToSeconds(eHour, eMin) && hourMinToSeconds(tHour, tMin) < hourMinToSeconds(lHour, lMin);
 }
+
+// Convert matrix pixel order to start at the upper left and end at the lower right.
+int rotateMatrix(unsigned int i)
+{
+  //const int conversion[16] = {15, 8, 7, 0, 14, 9, 6, 1, 13, 10, 5, 2, 12, 11, 4, 3};
+   const int conversion[16] = {3,4,11,12,2,5,10,13,1,6,9,14,0,7,8,15};
+  if (i >= 16)
+  {
+    return 0;
+  }
+
+  return conversion[i]; 
+}

@@ -9,13 +9,16 @@
     ESP32 (ESP32 DevKitV1)
   
   TFT:
-    320*240 touch TFT ILI9488 (Brand: HiLetGo) with SD card slot.
+    320*240 touch TFT ILI9488 (Brand example: HiLetGo) with SD card slot.
   
   NeoPixels:
     4x4 WS2812b LED matrix.
 
   TODO:
     Add LED matrix effects. 
+    Check for market holiday.
+    Add matrix dimming.
+    Add display dimming.
 
   History:
 
@@ -31,6 +34,8 @@
 #include <TFT_eSPI.h>
 #include <SD.h>
 #include <vector>
+#include <list>
+
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include "time.h"
@@ -100,6 +105,12 @@ void Error(ErrorIDs errorId)
     ;
 }
 
+auto sortByAbsFloat = [](float i, float j) {
+  return abs(i) < abs(j);
+};
+
+
+
 void UpdateNeoPixelMatrix()
 {
   static unsigned long start = millis();
@@ -107,23 +118,47 @@ void UpdateNeoPixelMatrix()
   if (millis() - start > delay)
   {
     start = millis();
+    
 
     if (parameters.matrix.marketHoursPattern.equalsIgnoreCase("TOP16"))
     {
+      // Order change price data by magnitude.
+      std::vector<float> changes;
+      for (auto &symbolData : parameters.symbolData)
+      {
+        //Serial.println(symbolData.change);
+        changes.push_back(symbolData.change);
+      }
+      sort(changes.begin(), changes.end(), sortByAbsFloat);
+
+      for (int i = 0; i < matrix.numPixels() && i < changes.size(); i++)
+      {  
+        if (changes[i] > 0)
+        {
+          matrix.setPixelColor(rotateMatrix(i), Green);
+        }
+        else if (changes[i] < 0)
+        {
+          matrix.setPixelColor(rotateMatrix(i), Red);
+        }
+        else
+        {
+          matrix.setPixelColor(rotateMatrix(i), Off);
+        }
+      }
     }
     else if (parameters.matrix.marketHoursPattern.equalsIgnoreCase("REDGREENCHECKER"))
     {
+      for (int i = 0; i < matrix.numPixels(); i++)
+      {
+        if (random(0, 2) == 0)
+          matrix.setPixelColor(i, Red);
+        else
+          matrix.setPixelColor(i, Green);
+      }
     }
     else if (parameters.matrix.marketHoursPattern.equalsIgnoreCase("RAINBOW"))
     {
-    }
-
-    for (int i = 0; i < matrix.numPixels(); i++)
-    {
-      if (random(0, 2) == 0)
-        matrix.setPixelColor(i, matrix.Color(255, 0, 0));
-      else
-        matrix.setPixelColor(i, matrix.Color(0, 255, 0));
     }
 
     matrix.show();
@@ -203,6 +238,10 @@ bool GetParametersFromSDCard()
   parameters.display.dimEndHour = doc["display"]["dimEndHour"].as<int>();
   parameters.matrix.marketHoursPattern = doc["matrix"]["marketHoursPattern"].as<int>();
   parameters.matrix.afterHoursPattern = doc["matrix"]["afterHoursPattern"].as<int>();
+  parameters.matrix.brightnessMax = doc["matrix"]["brightnessMax"].as<int>();
+  parameters.matrix.brightnessMin = doc["matrix"]["brightnessMin"].as<int>();
+  parameters.matrix.dimStartHour = doc["matrix"]["dimStartHour"].as<int>();
+  parameters.matrix.dimEndHour = doc["matrix"]["dimEndHour"].as<int>();
   parameters.system.timeZone = doc["system"]["timeZone"].as<String>();
 
   // Conform parameters into acceptable ranges.
@@ -524,7 +563,7 @@ void GetSymbolData(void *)
   while (1)
   {
 
-    if (millis() - start > 2000) // TODO: change to API per min calc provided user param
+    if (millis() - start > 1000) // TODO: change to API per min calc provided user param
     {
       start = millis();
 
@@ -616,7 +655,7 @@ bool ConnectWifi()
 
   while (1)
   {
-    DisplayBlank();    
+    DisplayBlank();
     tft.setTextSize(2);
     tft.setTextColor(TFT_GREEN);
     tft.setTextDatum(TL_DATUM);
@@ -624,7 +663,7 @@ bool ConnectWifi()
     sprintf(buf, "SSID: %s\n", parameters.wifiCredentials[wifiCredentialsIndex].ssid.c_str());
     tft.drawString(buf, 10, 70);
     sprintf(buf, "Password: %s\n", parameters.wifiCredentials[wifiCredentialsIndex].password.c_str());
-    tft.drawString(buf, 10, 90);  
+    tft.drawString(buf, 10, 90);
     Serial.printf("\nWIFI: Connecting to SSID: %s, with password: %s\n", parameters.wifiCredentials[wifiCredentialsIndex].ssid.c_str(), parameters.wifiCredentials[wifiCredentialsIndex].password.c_str());
 
     WiFi.begin(parameters.wifiCredentials[wifiCredentialsIndex].ssid.c_str(), parameters.wifiCredentials[wifiCredentialsIndex].password.c_str());
@@ -641,14 +680,14 @@ bool ConnectWifi()
       {
         tft.drawString("Connected!\n", 10, 140);
         sprintf(buf, "IP: %s\n", WiFi.localIP().toString().c_str());
-        tft.drawString(buf, 10, 160);       
+        tft.drawString(buf, 10, 160);
         Serial.println("");
         Serial.printf("WIFI: WiFi connected to %s, device IP: %s\n", parameters.wifiCredentials[wifiCredentialsIndex].ssid.c_str(), WiFi.localIP().toString().c_str());
         delay(1000);
         DisplayBlank();
         return true;
       }
-    }  
+    }
 
     wifiCredentialsIndex++;
     if (wifiCredentialsIndex > parameters.wifiCredentials.size() - 1)

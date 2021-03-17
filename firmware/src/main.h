@@ -36,6 +36,10 @@ struct Matrix
 {
   String marketHoursPattern;
   String afterHoursPattern;
+    int brightnessMax;
+  int brightnessMin;
+  int dimStartHour;
+  int dimEndHour;
 };
 
 struct System
@@ -117,3 +121,12 @@ enum class MarketState
 
 
 static const char * const MarketStateDesciption[]= {"Unknown", "Holiday", "Weekend", "PreHours", "MarketHours", "AfterHours", "Closed"};
+
+
+// Matrix colors (NeoPixels)
+const int Off = 0x00000000;
+const int Red = 0x00FF0000;
+const int Green = 0x0000FF00;
+const int Blue = 0x000000FF;
+
+
