@@ -34,13 +34,14 @@ unsigned long hourMinToSeconds(int hour, int minute)
 }
 
 // Check is time is between two times.
-// Test hour/min
 bool isTimeBetweenTimes(int tHour, int tMin, int hour1, int min1, int hour2, int min2)
 {
   return hourMinToSeconds(tHour, tMin) > min(hourMinToSeconds(hour1, min1), hourMinToSeconds(hour2, min2)) &&
          hourMinToSeconds(tHour, tMin) < max(hourMinToSeconds(hour1, min1), hourMinToSeconds(hour2, min2));
 }
 
+// Get hour and min from string format "12:34".
+// TODO: add isDigit() check.
 bool getHourMin(String string, int *hour, int *min)
 {
   if (string.length() != 5)

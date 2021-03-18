@@ -56,7 +56,8 @@ TFT_eSPI tft = TFT_eSPI();
 Adafruit_NeoPixel matrix = Adafruit_NeoPixel(16, PIN_LED_NEOPIXEL_MATRIX, NEO_GRB + NEO_KHZ800);
 
 // Time.
-struct tm timeinfo;
+struct tm currentTimeInfo;
+time_t currentEpoch;
 const char *ntpServer = "pool.ntp.org";
 const long gmtOffset_sec = -5 * 60 * 60;
 const int daylightOffset_sec = 3600;
@@ -125,7 +126,7 @@ void UpdateNeoPixelMatrix()
     getHourMin(parameters.matrix.dimStartTime, &startHour, &startMin);
     getHourMin(parameters.matrix.dimEndTime, &endHour, &endMin);
 
-    if (isTimeBetweenTimes(timeinfo.tm_hour, timeinfo.tm_min, startHour, startMin, endHour, endMin))
+    if (isTimeBetweenTimes(currentTimeInfo.tm_hour, currentTimeInfo.tm_min, startHour, startMin, endHour, endMin))
     {
       brightness = startHour > endHour ? parameters.matrix.brightnessMax : parameters.matrix.brightnessMin;
     }
@@ -322,7 +323,8 @@ void UpdateIndicators(bool forceUpdate = false)
   {
     previousStatus = status;
 
-    sprintf(buf, "%02u:%02u", timeinfo.tm_hour, timeinfo.tm_min);
+    sprintf(buf, "%02u:%02u", currentTimeInfo.tm_hour, currentTimeInfo.tm_min);
+
     DisplayIndicator("SD", 25, y, status.sd ? TFT_GREEN : TFT_RED);
     DisplayIndicator("WIFI", 75, y, status.wifi ? TFT_GREEN : TFT_RED);
     DisplayIndicator("API", 130, y, status.api ? TFT_GREEN : TFT_RED);
@@ -464,7 +466,7 @@ void DisplayStockData(SymbolData symbolData)
 
     // Update.
     tft.setTextPadding(0);
-    time_t rawtime(symbolData.lastUpdate);
+    time_t rawtime(symbolData.latestUpdate);
     sprintf(buf, "%02u:%02u", localtime(&rawtime)->tm_hour, localtime(&rawtime)->tm_min);
     tft.drawString(buf, 260, 182);
     //////////////////////////////////////////////////////
@@ -497,6 +499,8 @@ bool GetSymbolDataFromApiIEXCLOUD(SymbolData *symbolData)
   {
     return false;
   }
+
+  symbolData->lastApiCall = currentEpoch;
 
   Serial.print("API: Connecting to ");
   Serial.println(host);
@@ -568,7 +572,7 @@ bool GetSymbolDataFromApiIEXCLOUD(SymbolData *symbolData)
   symbolData->week52High = doc["week52High"].as<float>();
   symbolData->week52High = doc["week52High"].as<float>();
   symbolData->week52Low = doc["week52Low"].as<float>();
-  symbolData->lastUpdate = doc["latestUpdate"].as<long long>();
+  symbolData->latestUpdate = doc["latestUpdate"].as<long long>() / 1000; // convert milliseconds to seconds
 
   // OTC stocks have different price locations. (?)
   if (doc["iexRealtimePrice"].is<float>())
@@ -598,21 +602,21 @@ void GetMarketState(tm currentTime, MarketState *ms)
   {
     *ms = MarketState::Holiday;
   }
-  else if (timeinfo.tm_wday == 0 || timeinfo.tm_wday == 0) // Sunday or Saturday.
+  else if (currentTimeInfo.tm_wday == 0 || currentTimeInfo.tm_wday == 0) // Sunday or Saturday.
   {
     *ms = MarketState::Weekend;
   }
   else
   {
-    if (isTimeBetweenTimes(timeinfo.tm_hour, timeinfo.tm_min, 4, 0, 9, 29)) // Pre Market hours.
+    if (isTimeBetweenTimes(currentTimeInfo.tm_hour, currentTimeInfo.tm_min, 4, 0, 9, 29)) // Pre Market hours.
     {
       *ms = MarketState::PreHours;
     }
-    else if (isTimeBetweenTimes(timeinfo.tm_hour, timeinfo.tm_min, 9, 30, 15, 59)) // Market hours.
+    else if (isTimeBetweenTimes(currentTimeInfo.tm_hour, currentTimeInfo.tm_min, 9, 30, 15, 59)) // Market hours.
     {
       *ms = MarketState::MarketHours;
     }
-    else if (isTimeBetweenTimes(timeinfo.tm_hour, timeinfo.tm_min, 16, 0, 22, 0)) // After market hours.
+    else if (isTimeBetweenTimes(currentTimeInfo.tm_hour, currentTimeInfo.tm_min, 16, 0, 22, 0)) // After market hours.
     {
       *ms = MarketState::AfterHours;
     }
@@ -656,13 +660,13 @@ void GetSymbolData(void *)
     {
       start = millis();
 
-      // Get index of symbol with oldest data.
+      // Get index of symbol with oldest api call time.
       int selectedIndex = 0;
       for (int i = 0; i < parameters.symbolData.size(); i++)
       {
         if (parameters.symbolData[i].isValid)
         {
-          if (parameters.symbolData[i].lastUpdate < parameters.symbolData[selectedIndex].lastUpdate)
+          if (parameters.symbolData[i].latestUpdate < parameters.symbolData[selectedIndex].latestUpdate)
           {
             selectedIndex = i;
           }
@@ -674,7 +678,7 @@ void GetSymbolData(void *)
         if ((marketState == MarketState::PreHours && parameters.market.fetchPreMarketData) ||
             (marketState == MarketState::MarketHours) ||
             (marketState == MarketState::AfterHours && parameters.market.fetchAfterMarketData) ||
-            parameters.symbolData[selectedIndex].lastUpdate == 0)
+            parameters.symbolData[selectedIndex].latestUpdate == 0)
         {
 
           Serial.printf("API: Requesting data for symbol: %s\n", parameters.symbolData[selectedIndex].symbol.c_str());
@@ -795,10 +799,25 @@ bool ConnectWifi()
 
 bool GetTime()
 {
-  if (!getLocalTime(&timeinfo))
+  static unsigned long startGetTime = millis();
+
+  if (millis() - startGetTime > 250)
   {
-    Serial.println("TIME: Failed to obtain time");
-    return false;
+    startGetTime = millis();
+
+    if (!getLocalTime(&currentTimeInfo))
+    {
+      Serial.println("TIME: Failed to obtain time");
+      return false;
+    }
+    time(&currentEpoch);
+
+    static int previousMinute = ~currentTimeInfo.tm_min;
+    if (previousMinute != currentTimeInfo.tm_min)
+    {
+      previousMinute = currentTimeInfo.tm_min;
+      UpdateIndicators(true);
+    }
   }
 
   return true;
@@ -856,13 +875,17 @@ void setup()
       1,               // Task priority
       NULL             // Task handle
   );
+
+  Serial.printf("API: mode: %s\n", apiModeText[int(parameters.api.mode)]);
 }
 
 void loop()
 {
   static unsigned int previousSymbolSelect;
 
-  GetMarketState(timeinfo, &marketState);
+  GetTime();
+
+  GetMarketState(currentTimeInfo, &marketState);
 
   UpdateNeoPixelMatrix();
 
@@ -909,14 +932,5 @@ void loop()
   {
     previousSymbolSelect = symbolSelect;
     DisplayStockData(parameters.symbolData.at(symbolSelect));
-  }
-
-  // Fetch time.
-  static unsigned long startGetTime = millis();
-  if (millis() - startGetTime > 750)
-  {
-    startGetTime = millis();
-    status.time = GetTime();
-    UpdateIndicators(true);
   }
 }

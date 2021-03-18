@@ -12,9 +12,9 @@ struct SymbolData
   float peRatio = 0;
   float week52High = 0;
   float week52Low = 0;
-  unsigned long long lastUpdate = 0; // EPOCH.
+  unsigned long long latestUpdate = 0; // EPOCH.
+  unsigned long long lastApiCall = 0; // EPOCH.
   bool isValid = true;
-  // bool initialized = false;
   String errorString = "";
 };
 
@@ -25,6 +25,8 @@ enum class ApiMode
   Sandbox,
   Live
 };
+
+static const char *const apiModeText[] = {"Unknown", "Demo", "Sandbox", "Live"};
 
 struct Api
 {
