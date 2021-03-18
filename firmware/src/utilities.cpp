@@ -56,7 +56,7 @@ bool getHourMin(String string, int *hour, int *min)
   *hour = string.substring(0, 2).toInt();
   *min = string.substring(3, 5).toInt();
 
-  return false;
+  return true;
 }
 
 // Convert matrix pixel order to start at the upper left and end at the lower right.

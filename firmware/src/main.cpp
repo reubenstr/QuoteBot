@@ -15,15 +15,13 @@
     4x4 WS2812b LED matrix.
 
   TODO: 
-    Check for market holiday.    
-    Add display dimming.
+    Check for market holiday.  
 
   History:
 
   VERSION   AUTHOR      DATE        NOTES
   =============================================================================
   0.0.0     ReubenStr   2021/13/3   Development phase.
-
 
 */
 
@@ -122,17 +120,13 @@ void UpdateNeoPixelMatrix()
     start = millis();
 
     byte brightness = 0;
-    int startHour, startMin, endHour, endMin;
-    getHourMin(parameters.matrix.dimStartTime, &startHour, &startMin);
-    getHourMin(parameters.matrix.dimEndTime, &endHour, &endMin);
-
-    if (isTimeBetweenTimes(currentTimeInfo.tm_hour, currentTimeInfo.tm_min, startHour, startMin, endHour, endMin))
+    if (isTimeBetweenTimes(currentTimeInfo.tm_hour, currentTimeInfo.tm_min, parameters.matrix.dimStartHour, parameters.matrix.dimStartMin, parameters.matrix.dimEndHour, parameters.matrix.dimEndMin))
     {
-      brightness = startHour > endHour ? parameters.matrix.brightnessMax : parameters.matrix.brightnessMin;
+      brightness = parameters.matrix.dimStartHour > parameters.matrix.dimEndHour ? parameters.matrix.brightnessMax : parameters.matrix.brightnessMin;
     }
     else
     {
-      brightness = startHour > endHour ? parameters.matrix.brightnessMin : parameters.matrix.brightnessMax;
+      brightness = parameters.matrix.dimStartHour > parameters.matrix.dimEndHour ? parameters.matrix.brightnessMin : parameters.matrix.brightnessMax;
     }
     matrix.setBrightness(brightness);
 
@@ -269,8 +263,8 @@ bool GetParametersFromSDCard()
   parameters.display.nextSymbolDelay = doc["display"]["nextSymbolDelay"].as<int>();
   parameters.display.brightnessMax = doc["display"]["brightnessMax"].as<int>();
   parameters.display.brightnessMin = doc["display"]["brightnessMin"].as<int>();
-  parameters.display.dimStartHour = doc["display"]["dimStartHour"].as<int>();
-  parameters.display.dimEndHour = doc["display"]["dimEndHour"].as<int>();
+  getHourMin(doc["display"]["dimStartTime"].as<String>(), &parameters.display.dimStartHour, &parameters.display.dimStartMin);
+  getHourMin(doc["display"]["dimEndTime"].as<String>(), &parameters.display.dimEndHour, &parameters.display.dimEndMin);
 
   parameters.matrix.holidayPattern = doc["matrix"]["holidayPattern"].as<String>();
   parameters.matrix.weekendPattern = doc["matrix"]["weekendPattern"].as<String>();
@@ -280,9 +274,8 @@ bool GetParametersFromSDCard()
   parameters.matrix.closedPattern = doc["matrix"]["closedPattern"].as<String>();
   parameters.matrix.brightnessMax = doc["matrix"]["brightnessMax"].as<int>();
   parameters.matrix.brightnessMin = doc["matrix"]["brightnessMin"].as<int>();
-  parameters.matrix.dimStartTime = doc["matrix"]["dimStartTime"].as<String>();
-  parameters.matrix.dimEndTime = doc["matrix"]["dimEndTime"].as<String>();
-
+  getHourMin(doc["matrix"]["dimStartTime"].as<String>(), &parameters.matrix.dimStartHour, &parameters.matrix.dimStartMin);
+  getHourMin(doc["matrix"]["dimEndTime"].as<String>(), &parameters.matrix.dimEndHour, &parameters.matrix.dimEndMin);
   parameters.system.timeZone = doc["system"]["timeZone"].as<String>();
 
   // Conform parameters into acceptable ranges.
@@ -487,6 +480,7 @@ bool GetSymbolDataFromApiIEXCLOUD(SymbolData *symbolData)
   String payload;
   String host;
 
+  // API documentation: https://iexcloud.io/docs/api/#quote
   if (parameters.api.mode == ApiMode::Live)
   {
     host = "https://cloud.iexapis.com/stable/stock/" + symbolData->symbol + "/quote?token=" + parameters.api.key;
@@ -542,6 +536,7 @@ bool GetSymbolDataFromApiIEXCLOUD(SymbolData *symbolData)
         return false;
       }
 
+      // TODO: report more error codes. https://iexcloud.io/docs/api/#error-codes
       return false;
     }
   }
@@ -565,7 +560,7 @@ bool GetSymbolDataFromApiIEXCLOUD(SymbolData *symbolData)
     return false;
   }
 
-   symbolData->currentPrice = doc["latestPrice"].as<float>();
+  symbolData->currentPrice = doc["latestPrice"].as<float>();
   symbolData->companyName = doc["companyName"].as<String>();
   symbolData->openPrice = doc["previousClose"].as<float>();
   symbolData->change = doc["change"].as<float>();
@@ -575,10 +570,7 @@ bool GetSymbolDataFromApiIEXCLOUD(SymbolData *symbolData)
   symbolData->week52Low = doc["week52Low"].as<float>();
   symbolData->latestUpdate = doc["latestUpdate"].as<long long>() / 1000; // convert milliseconds to seconds
 
-  
-
-
- /*
+  /*
   // OTC stocks have different price locations. (?)
   if (doc["iexRealtimePrice"].is<float>())
   {
@@ -810,12 +802,7 @@ bool GetTime()
   if (millis() - startGetTime > 250)
   {
     startGetTime = millis();
-  
 
-  
-
-   
- 
     if (!getLocalTime(&currentTimeInfo))
     {
       Serial.println("TIME: Failed to obtain time");
@@ -826,7 +813,6 @@ bool GetTime()
     status.time = true;
 
     time(&currentEpoch);
-    
 
     static int previousMinute = ~currentTimeInfo.tm_min;
     if (previousMinute != currentTimeInfo.tm_min)
@@ -837,6 +823,20 @@ bool GetTime()
   }
 
   return true;
+}
+
+void CheckDisplayBrightness()
+{
+  byte brightness = 0;
+  if (isTimeBetweenTimes(currentTimeInfo.tm_hour, currentTimeInfo.tm_min, parameters.display.dimStartHour, parameters.display.dimStartMin, parameters.display.dimEndHour, parameters.display.dimEndMin))
+  {
+    brightness = parameters.display.dimStartHour > parameters.display.dimEndHour ? parameters.display.brightnessMax : parameters.display.brightnessMin;
+  }
+  else
+  {
+    brightness = parameters.display.dimStartHour > parameters.display.dimEndHour ? parameters.display.brightnessMin : parameters.display.brightnessMax;
+  }
+  ledcWrite(0, brightness);
 }
 
 void setup()
@@ -908,6 +908,8 @@ void loop()
   CheckTouchScreen();
 
   UpdateIndicators();
+
+  CheckDisplayBrightness();
 
   // Check for WiFi connection, attempt reconnect after timeout.
   status.wifi = (WiFi.status() == WL_CONNECTED);

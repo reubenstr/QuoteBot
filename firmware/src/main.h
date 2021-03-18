@@ -43,7 +43,9 @@ struct Display
   int brightnessMax;
   int brightnessMin;
   int dimStartHour;
+  int dimStartMin;
   int dimEndHour;
+  int dimEndMin;
 };
 struct Matrix
 {
@@ -55,8 +57,11 @@ struct Matrix
   String closedPattern;
   int brightnessMax;
   int brightnessMin;
-  String dimStartTime;
-  String dimEndTime;
+
+  int dimStartHour;
+  int dimStartMin;
+  int dimEndHour;
+  int dimEndMin;
 };
 
 struct System
