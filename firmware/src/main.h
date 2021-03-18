@@ -34,12 +34,16 @@ struct Display
 };
 struct Matrix
 {
-  String marketHoursPattern;
-  String afterHoursPattern;
-    int brightnessMax;
+  String holidayPattern;
+  String weekendPattern;
+  String preMarketPattern;
+  String marketPattern;
+  String afterMarketPattern;
+  String closedPattern;
+  int brightnessMax;
   int brightnessMin;
-  int dimStartHour;
-  int dimEndHour;
+  String dimStartTime;
+  String dimEndTime;
 };
 
 struct System
@@ -55,8 +59,8 @@ struct WifiCredentials
 
 struct Market
 {
-    bool fetchPreMarketData;
-    bool fetchAfterMarketData;
+  bool fetchPreMarketData;
+  bool fetchAfterMarketData;
 };
 
 struct Parameters
@@ -68,7 +72,6 @@ struct Parameters
   Display display;
   Matrix matrix;
   System system;
-
 };
 
 enum class LabelsIds
@@ -98,7 +101,6 @@ struct Status
             symbolLocked != s.symbolLocked ||
             requestInProgess != s.requestInProgess);
   }
-
 };
 
 enum class ErrorIDs
@@ -110,23 +112,15 @@ enum class ErrorIDs
 
 enum class MarketState
 {
-    Unknown,
-    Holiday,
-    Weekend,
-    PreHours,
-    MarketHours,
-    AfterHours,
-    Closed    
+  Unknown,
+  Holiday,
+  Weekend,
+  PreHours,
+  MarketHours,
+  AfterHours,
+  Closed
 };
 
-
-static const char * const MarketStateDesciption[]= {"Unknown", "Holiday", "Weekend", "PreHours", "MarketHours", "AfterHours", "Closed"};
-
-
-// Matrix colors (NeoPixels)
-const int Off = 0x00000000;
-const int Red = 0x00FF0000;
-const int Green = 0x0000FF00;
-const int Blue = 0x000000FF;
-
-
+static const char *const marketStateDesciptionTop[] = {"Unknown", "Holiday", "Weekend", "Pre", "Open", "After", "Closed"};
+static const char *const marketStateDesciptionBottom[] = {"", "", "", "Hours", "", "Hours", ""};
+// static const char *const marketStateDesciptionLetter[] = {"U", "H", "W", "P", "M", "S", "C"};

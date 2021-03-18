@@ -40,9 +40,10 @@
 #include <HTTPClient.h>
 #include "time.h"
 #include <Adafruit_NeoPixel.h>
-#include "utilities.h"  // Local.
-#include "tftMethods.h" // Local.
-#include "main.h"       // Local.
+#include "utilities.h"      // Local.
+#include "tftMethods.h"     // Local.
+#include "main.h"           // Local.
+#include "NeoPixelHelper.h" //Local.
 
 #define ARDUINOJSON_USE_LONG_LONG 1
 #include <ArduinoJson.h>
@@ -109,8 +110,6 @@ auto sortByAbsFloat = [](float i, float j) {
   return abs(i) < abs(j);
 };
 
-
-
 void UpdateNeoPixelMatrix()
 {
   static unsigned long start = millis();
@@ -118,47 +117,83 @@ void UpdateNeoPixelMatrix()
   if (millis() - start > delay)
   {
     start = millis();
-    
 
-    if (parameters.matrix.marketHoursPattern.equalsIgnoreCase("TOP16"))
+    byte brightness = 0;
+    int startHour, startMin, endHour, endMin;
+
+    getHourMin(parameters.matrix.dimStartTime, &startHour, &startMin);
+    getHourMin(parameters.matrix.dimEndTime, &endHour, &endMin);
+
+    if (isTimeBetweenTimes(timeinfo.tm_hour, timeinfo.tm_min, startHour, startMin, endHour, endMin))
+    {
+      Serial.println("yes");
+      brightness = startHour > endHour ? parameters.matrix.brightnessMax : parameters.matrix.brightnessMin;
+    }
+    else
+    {
+      Serial.println("no");
+      brightness = startHour > endHour ? parameters.matrix.brightnessMin : parameters.matrix.brightnessMax;
+    }
+    matrix.setBrightness(brightness);
+
+    String pattern =
+        marketState == MarketState::Holiday       ? parameters.matrix.holidayPattern
+        : marketState == MarketState::Weekend     ? parameters.matrix.weekendPattern
+        : marketState == MarketState::PreHours    ? parameters.matrix.preMarketPattern
+        : marketState == MarketState::MarketHours ? parameters.matrix.marketPattern
+        : marketState == MarketState::AfterHours  ? parameters.matrix.afterMarketPattern
+        : marketState == MarketState::Closed      ? parameters.matrix.closedPattern
+                                                  : "";
+    // TEMP
+    Serial.print("pattern ");
+    Serial.println(pattern);
+    Serial.print("brightness ");
+    Serial.println(brightness);
+
+    if (pattern.equalsIgnoreCase("TOP16"))
     {
       // Order change price data by magnitude.
       std::vector<float> changes;
       for (auto &symbolData : parameters.symbolData)
       {
-        //Serial.println(symbolData.change);
         changes.push_back(symbolData.change);
       }
       sort(changes.begin(), changes.end(), sortByAbsFloat);
 
       for (int i = 0; i < matrix.numPixels() && i < changes.size(); i++)
-      {  
+      {
         if (changes[i] > 0)
         {
-          matrix.setPixelColor(rotateMatrix(i), Green);
+          matrix.setPixelColor(rotateMatrix(i), NeoGreen);
         }
         else if (changes[i] < 0)
         {
-          matrix.setPixelColor(rotateMatrix(i), Red);
+          matrix.setPixelColor(rotateMatrix(i), NeoRed);
         }
         else
         {
-          matrix.setPixelColor(rotateMatrix(i), Off);
+          matrix.setPixelColor(rotateMatrix(i), NeoOff);
         }
       }
     }
-    else if (parameters.matrix.marketHoursPattern.equalsIgnoreCase("REDGREENCHECKER"))
+    else if (pattern.equalsIgnoreCase("RANDOMREDGREEN"))
     {
       for (int i = 0; i < matrix.numPixels(); i++)
       {
         if (random(0, 2) == 0)
-          matrix.setPixelColor(i, Red);
+          matrix.setPixelColor(i, NeoRed);
         else
-          matrix.setPixelColor(i, Green);
+          matrix.setPixelColor(i, NeoGreen);
       }
     }
-    else if (parameters.matrix.marketHoursPattern.equalsIgnoreCase("RAINBOW"))
+    else if (pattern.equalsIgnoreCase("RAINBOW"))
     {
+      static byte wheelPos = 0;
+      wheelPos++;
+      for (int i = 0; i < matrix.numPixels(); i++)
+      {
+        matrix.setPixelColor(rotateMatrix(i), Wheel(wheelPos + i * (255 / matrix.numPixels())));
+      }
     }
 
     matrix.show();
@@ -229,19 +264,27 @@ bool GetParametersFromSDCard()
   parameters.api.provider = doc["api"]["apiProvider"].as<String>();
   parameters.api.key = doc["api"]["apiKey"].as<String>();
   parameters.api.maxRequestsPerMinute = doc["api"]["apiMaxRequestsPerMinute"].as<int>();
+
   parameters.market.fetchPreMarketData = doc["market"]["fetchPreMarketData"].as<int>();
   parameters.market.fetchAfterMarketData = doc["market"]["fetchAfterMarketData"].as<int>();
+
   parameters.display.nextSymbolDelay = doc["display"]["nextSymbolDelay"].as<int>();
   parameters.display.brightnessMax = doc["display"]["brightnessMax"].as<int>();
   parameters.display.brightnessMin = doc["display"]["brightnessMin"].as<int>();
   parameters.display.dimStartHour = doc["display"]["dimStartHour"].as<int>();
   parameters.display.dimEndHour = doc["display"]["dimEndHour"].as<int>();
-  parameters.matrix.marketHoursPattern = doc["matrix"]["marketHoursPattern"].as<int>();
-  parameters.matrix.afterHoursPattern = doc["matrix"]["afterHoursPattern"].as<int>();
+
+  parameters.matrix.holidayPattern = doc["matrix"]["holidayPattern"].as<String>();
+  parameters.matrix.weekendPattern = doc["matrix"]["weekendPattern"].as<String>();
+  parameters.matrix.preMarketPattern = doc["matrix"]["preMarketPattern"].as<String>();
+  parameters.matrix.marketPattern = doc["matrix"]["marketPattern"].as<String>();
+  parameters.matrix.afterMarketPattern = doc["matrix"]["afterMarketPattern"].as<String>();
+  parameters.matrix.closedPattern = doc["matrix"]["closedPattern"].as<String>();
   parameters.matrix.brightnessMax = doc["matrix"]["brightnessMax"].as<int>();
   parameters.matrix.brightnessMin = doc["matrix"]["brightnessMin"].as<int>();
-  parameters.matrix.dimStartHour = doc["matrix"]["dimStartHour"].as<int>();
-  parameters.matrix.dimEndHour = doc["matrix"]["dimEndHour"].as<int>();
+  parameters.matrix.dimStartTime = doc["matrix"]["dimStartTime"].as<String>();
+  parameters.matrix.dimEndTime = doc["matrix"]["dimEndTime"].as<String>();
+
   parameters.system.timeZone = doc["system"]["timeZone"].as<String>();
 
   // Conform parameters into acceptable ranges.
@@ -276,7 +319,18 @@ void UpdateIndicators(bool forceUpdate = false)
   {
     previousStatus = status;
 
-    sprintf(buf, "%02u:%02u:%02u", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+    sprintf(buf, "%02u:%02u", timeinfo.tm_hour, timeinfo.tm_min);
+
+    DisplayIndicator("SD", 25, y, status.sd ? TFT_GREEN : TFT_RED);
+    DisplayIndicator("WIFI", 78, y, status.wifi ? TFT_GREEN : TFT_RED);
+    DisplayIndicator("API", 135, y, status.api ? TFT_GREEN : TFT_RED);
+    // DisplayIndicator(marketStateDesciptionLetter[int(marketState)], 173, y, 1 ? TFT_MAGENTA : TFT_MAGENTA);
+    DisplayIndicator("L", 198, y, status.symbolLocked ? TFT_BLUE : 0x0001);
+    DisplayIndicator("R", 225, y, status.requestInProgess ? TFT_BLUE : 0x0001);
+    DisplayIndicator(String(buf), 277, y, status.time ? TFT_GREEN : TFT_RED);
+
+    /*
+     sprintf(buf, "%02u:%02u:%02u", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
 
     DisplayIndicator("SD", 25, y, status.sd ? TFT_GREEN : TFT_RED);
     DisplayIndicator("WIFI", 75, y, status.wifi ? TFT_GREEN : TFT_RED);
@@ -284,6 +338,7 @@ void UpdateIndicators(bool forceUpdate = false)
     DisplayIndicator("L", 165, y, status.symbolLocked ? TFT_BLUE : 0x0001);
     DisplayIndicator("R", 190, y, status.requestInProgess ? TFT_BLUE : 0x0001);
     DisplayIndicator(String(buf), 260, y, status.time ? TFT_GREEN : TFT_RED);
+    */
   }
 }
 
@@ -316,7 +371,6 @@ void DisplayStockData(SymbolData symbolData)
 
   if (symbolData.isValid)
   {
-
     // Company name.
     tft.setTextSize(2);
     tft.setTextDatum(TL_DATUM);
@@ -386,8 +440,7 @@ void DisplayStockData(SymbolData symbolData)
     tft.setTextPadding(0);
     tft.drawString("Update", 260, 160);
     tft.drawString("P/E", 50, 160);
-    tft.drawString("Open", 150, 160);
-
+ 
     // PE.
     if (symbolData.peRatio == peRatioNA)
     {
@@ -400,15 +453,26 @@ void DisplayStockData(SymbolData symbolData)
     tft.setTextPadding(tft.textWidth("-123.56"));
     tft.drawString(buf, 50, 182);
 
-    // Open.
-    tft.setTextPadding(tft.textWidth("12345.78"));
-    sprintf(buf, "%3.2f", symbolData.openPrice);
-    tft.drawString(buf, 150, 182);
+    // Market state.
+    tft.setTextPadding(tft.textWidth("Weekend"));
+    if (marketStateDesciptionBottom[int(marketState)][0] != 0)
+    {
+tft.drawString(marketStateDesciptionTop[int(marketState)], 150, 160);
+    tft.drawString(marketStateDesciptionBottom[int(marketState)], 150, 182);
+    }
+    else
+    {
+      tft.drawString(marketStateDesciptionTop[int(marketState)], 150, 171);
+   
+    }
+      
+      
+    
 
     // Update.
     tft.setTextPadding(0);
     time_t rawtime(symbolData.lastUpdate);
-    sprintf(buf, "%02u:%02u:%02u", localtime(&rawtime)->tm_hour, localtime(&rawtime)->tm_min, localtime(&rawtime)->tm_sec);
+    sprintf(buf, "%02u:%02u", localtime(&rawtime)->tm_hour, localtime(&rawtime)->tm_min);
     tft.drawString(buf, 260, 182);
     //////////////////////////////////////////////////////
   }
