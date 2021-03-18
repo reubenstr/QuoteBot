@@ -14,10 +14,8 @@
   NeoPixels:
     4x4 WS2812b LED matrix.
 
-  TODO:
-    Add LED matrix effects. 
-    Check for market holiday.
-    Add matrix dimming.
+  TODO: 
+    Check for market holiday.    
     Add display dimming.
 
   History:
@@ -53,9 +51,6 @@
 #define PIN_SD_CHIP_SELECT 15
 #define PIN_LED_NEOPIXEL_MATRIX 27
 
-// Demo mode.
-// const bool demoMode = true;
-
 // GLCD.
 TFT_eSPI tft = TFT_eSPI();
 Adafruit_NeoPixel matrix = Adafruit_NeoPixel(16, PIN_LED_NEOPIXEL_MATRIX, NEO_GRB + NEO_KHZ800);
@@ -81,7 +76,9 @@ bool isMarketHoliday = false;
 
 void Error(ErrorIDs errorId)
 {
+  tft.fillScreen(TFT_BLACK);
   tft.setTextSize(4);
+  tft.setTextDatum(TL_DATUM);
   tft.setTextColor(TFT_RED, TFT_BLACK);
   tft.drawString("ERROR!", 30, 20);
 
@@ -95,6 +92,11 @@ void Error(ErrorIDs errorId)
     tft.drawString("SD Card", 30, 90);
     tft.drawString("parameters", 30, 130);
     tft.drawString("are invalid.", 30, 170);
+  }
+  else if (errorId == ErrorIDs::UnknownApi)
+  {
+    tft.drawString("Uknown", 30, 90);
+    tft.drawString("API provider.", 30, 130);
   }
   else if (errorId == ErrorIDs::InvalidApiKey)
   {
@@ -120,18 +122,15 @@ void UpdateNeoPixelMatrix()
 
     byte brightness = 0;
     int startHour, startMin, endHour, endMin;
-
     getHourMin(parameters.matrix.dimStartTime, &startHour, &startMin);
     getHourMin(parameters.matrix.dimEndTime, &endHour, &endMin);
 
     if (isTimeBetweenTimes(timeinfo.tm_hour, timeinfo.tm_min, startHour, startMin, endHour, endMin))
     {
-      Serial.println("yes");
       brightness = startHour > endHour ? parameters.matrix.brightnessMax : parameters.matrix.brightnessMin;
     }
     else
     {
-      Serial.println("no");
       brightness = startHour > endHour ? parameters.matrix.brightnessMin : parameters.matrix.brightnessMax;
     }
     matrix.setBrightness(brightness);
@@ -144,11 +143,6 @@ void UpdateNeoPixelMatrix()
         : marketState == MarketState::AfterHours  ? parameters.matrix.afterMarketPattern
         : marketState == MarketState::Closed      ? parameters.matrix.closedPattern
                                                   : "";
-    // TEMP
-    Serial.print("pattern ");
-    Serial.println(pattern);
-    Serial.print("brightness ");
-    Serial.println(brightness);
 
     if (pattern.equalsIgnoreCase("TOP16"))
     {
@@ -261,9 +255,12 @@ bool GetParametersFromSDCard()
     parameters.wifiCredentials.push_back(wC);
   }
 
-  parameters.api.provider = doc["api"]["apiProvider"].as<String>();
-  parameters.api.key = doc["api"]["apiKey"].as<String>();
-  parameters.api.maxRequestsPerMinute = doc["api"]["apiMaxRequestsPerMinute"].as<int>();
+  String apiMode = doc["api"]["mode"].as<String>();
+  parameters.api.provider = doc["api"]["provider"].as<String>();
+  parameters.api.key = doc["api"]["key"].as<String>();
+  parameters.api.maxRequestsPerDay = doc["api"]["maxRequestsPerDay"].as<int>();
+  parameters.api.sandboxKey = doc["api"]["sandboxKey"].as<String>();
+  parameters.api.sandboxMaxRequestsPerDay = doc["api"]["sandboxMaxRequestsPerDay"].as<int>();
 
   parameters.market.fetchPreMarketData = doc["market"]["fetchPreMarketData"].as<int>();
   parameters.market.fetchAfterMarketData = doc["market"]["fetchAfterMarketData"].as<int>();
@@ -288,6 +285,12 @@ bool GetParametersFromSDCard()
   parameters.system.timeZone = doc["system"]["timeZone"].as<String>();
 
   // Conform parameters into acceptable ranges.
+
+  parameters.api.mode =
+      apiMode.equalsIgnoreCase("DEMO")      ? ApiMode::Demo
+      : apiMode.equalsIgnoreCase("SANDBOX") ? ApiMode::Sandbox
+      : apiMode.equalsIgnoreCase("LIVE")    ? ApiMode::Live
+                                            : ApiMode::Unknown;
 
   if (parameters.display.nextSymbolDelay < 1)
   {
@@ -320,25 +323,12 @@ void UpdateIndicators(bool forceUpdate = false)
     previousStatus = status;
 
     sprintf(buf, "%02u:%02u", timeinfo.tm_hour, timeinfo.tm_min);
-
-    DisplayIndicator("SD", 25, y, status.sd ? TFT_GREEN : TFT_RED);
-    DisplayIndicator("WIFI", 78, y, status.wifi ? TFT_GREEN : TFT_RED);
-    DisplayIndicator("API", 135, y, status.api ? TFT_GREEN : TFT_RED);
-    // DisplayIndicator(marketStateDesciptionLetter[int(marketState)], 173, y, 1 ? TFT_MAGENTA : TFT_MAGENTA);
-    DisplayIndicator("L", 198, y, status.symbolLocked ? TFT_BLUE : 0x0001);
-    DisplayIndicator("R", 225, y, status.requestInProgess ? TFT_BLUE : 0x0001);
-    DisplayIndicator(String(buf), 277, y, status.time ? TFT_GREEN : TFT_RED);
-
-    /*
-     sprintf(buf, "%02u:%02u:%02u", timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
-
     DisplayIndicator("SD", 25, y, status.sd ? TFT_GREEN : TFT_RED);
     DisplayIndicator("WIFI", 75, y, status.wifi ? TFT_GREEN : TFT_RED);
     DisplayIndicator("API", 130, y, status.api ? TFT_GREEN : TFT_RED);
     DisplayIndicator("L", 165, y, status.symbolLocked ? TFT_BLUE : 0x0001);
     DisplayIndicator("R", 190, y, status.requestInProgess ? TFT_BLUE : 0x0001);
     DisplayIndicator(String(buf), 260, y, status.time ? TFT_GREEN : TFT_RED);
-    */
   }
 }
 
@@ -440,7 +430,7 @@ void DisplayStockData(SymbolData symbolData)
     tft.setTextPadding(0);
     tft.drawString("Update", 260, 160);
     tft.drawString("P/E", 50, 160);
- 
+
     // PE.
     if (symbolData.peRatio == peRatioNA)
     {
@@ -455,19 +445,22 @@ void DisplayStockData(SymbolData symbolData)
 
     // Market state.
     tft.setTextPadding(tft.textWidth("Weekend"));
+    static MarketState previousMarketState = MarketState::Unknown;
+    if (previousMarketState != marketState)
+    {
+      previousMarketState = marketState;
+      tft.drawString("", 150, 160);
+      tft.drawString("", 150, 182);
+    }
     if (marketStateDesciptionBottom[int(marketState)][0] != 0)
     {
-tft.drawString(marketStateDesciptionTop[int(marketState)], 150, 160);
-    tft.drawString(marketStateDesciptionBottom[int(marketState)], 150, 182);
+      tft.drawString(marketStateDesciptionTop[int(marketState)], 150, 160);
+      tft.drawString(marketStateDesciptionBottom[int(marketState)], 150, 182);
     }
     else
     {
       tft.drawString(marketStateDesciptionTop[int(marketState)], 150, 171);
-   
     }
-      
-      
-    
 
     // Update.
     tft.setTextPadding(0);
@@ -484,15 +477,26 @@ tft.drawString(marketStateDesciptionTop[int(marketState)], 150, 160);
     tft.setTextDatum(TC_DATUM);
     tft.setTextColor(TFT_RED, TFT_BLACK);
     tft.drawString("Invalid Symbol", tft.height() / 2, 65);
-    //tft.drawString("Symbol", tft.height() / 2, 80);
   }
 }
 
-bool GetSymbolDataFromAPI(SymbolData *symbolData)
+bool GetSymbolDataFromApiIEXCLOUD(SymbolData *symbolData)
 {
   String payload;
-  //String host = "https://cloud.iexapis.com/stable/stock/" + symbolData->symbol + "/quote?token=" + parameters.apiKey;
-  String host = "https://sandbox.iexapis.com/stable/stock/" + symbolData->symbol + "/quote?token=Tpk_81853d40d7084179b6e722e84f44e148";
+  String host;
+
+  if (parameters.api.mode == ApiMode::Live)
+  {
+    host = "https://cloud.iexapis.com/stable/stock/" + symbolData->symbol + "/quote?token=" + parameters.api.key;
+  }
+  else if (parameters.api.mode == ApiMode::Sandbox)
+  {
+    host = "https://sandbox.iexapis.com/stable/stock/" + symbolData->symbol + "/quote?token=" + parameters.api.sandboxKey;
+  }
+  else
+  {
+    return false;
+  }
 
   Serial.print("API: Connecting to ");
   Serial.println(host);
@@ -624,14 +628,35 @@ void GetSymbolData(void *)
 {
   static unsigned long start = millis();
 
+  unsigned long millisecondsBetweenApiCalls = 1000;
+
+  if (parameters.api.mode == ApiMode::Live)
+  {
+    float apiHours = 6.5;
+    if (parameters.market.fetchPreMarketData)
+      apiHours += 5.5;
+    if (parameters.market.fetchAfterMarketData)
+      apiHours += 4;
+    millisecondsBetweenApiCalls = (1 / ((parameters.api.maxRequestsPerDay / apiHours) / 60.0 / 60.0)) * 1000.0;
+  }
+  else if (parameters.api.mode == ApiMode::Sandbox)
+  {
+    millisecondsBetweenApiCalls = (1 / ((parameters.api.sandboxMaxRequestsPerDay / 24) / 60.0 / 60.0)) * 1000.0;
+  }
+  else if (parameters.api.mode == ApiMode::Demo)
+  {
+    millisecondsBetweenApiCalls = 500;
+  }
+
+  Serial.printf("API: milliseconds per request: %u\n", millisecondsBetweenApiCalls);
+
   while (1)
   {
-
-    if (millis() - start > 1000) // TODO: change to API per min calc provided user param
+    if (millis() - start > millisecondsBetweenApiCalls)
     {
       start = millis();
 
-      // Get index symbol with oldest data.
+      // Get index of symbol with oldest data.
       int selectedIndex = 0;
       for (int i = 0; i < parameters.symbolData.size(); i++)
       {
@@ -644,26 +669,33 @@ void GetSymbolData(void *)
         }
       }
 
-      if ((marketState == MarketState::PreHours && parameters.market.fetchPreMarketData) ||
-          (marketState == MarketState::MarketHours) ||
-          (marketState == MarketState::AfterHours && parameters.market.fetchAfterMarketData) ||
-          parameters.symbolData[selectedIndex].lastUpdate == 0)
+      if (parameters.api.mode == ApiMode::Live || parameters.api.mode == ApiMode::Sandbox)
       {
-
-        Serial.printf("API: Requesting data for symbol: %s\n", parameters.symbolData[selectedIndex].symbol.c_str());
-        status.requestInProgess = true;
-
-        if (parameters.api.provider.equalsIgnoreCase("IEXCLOUD"))
+        if ((marketState == MarketState::PreHours && parameters.market.fetchPreMarketData) ||
+            (marketState == MarketState::MarketHours) ||
+            (marketState == MarketState::AfterHours && parameters.market.fetchAfterMarketData) ||
+            parameters.symbolData[selectedIndex].lastUpdate == 0)
         {
-          status.api = GetSymbolDataFromAPI(&parameters.symbolData[selectedIndex]);
-        }
-        else
-        {
-          Serial.printf("API: Error, unknown API provider: %s\n", parameters.api.provider.c_str());
-          status.api = false;
-        }
 
-        status.requestInProgess = false;
+          Serial.printf("API: Requesting data for symbol: %s\n", parameters.symbolData[selectedIndex].symbol.c_str());
+          status.requestInProgess = true;
+
+          if (parameters.api.provider.equalsIgnoreCase("IEXCLOUD"))
+          {
+            status.api = GetSymbolDataFromApiIEXCLOUD(&parameters.symbolData[selectedIndex]);
+          }
+          else
+          {
+            Serial.printf("API: Error, unknown API provider: %s\n", parameters.api.provider.c_str());
+            Error(ErrorIDs::UnknownApi);
+          }
+
+          status.requestInProgess = false;
+        }
+      }
+      else if (parameters.api.mode == ApiMode::Demo)
+      {
+        // TODO: generate random data.
       }
     }
   }

@@ -12,17 +12,28 @@ struct SymbolData
   float peRatio = 0;
   float week52High = 0;
   float week52Low = 0;
-  unsigned long long lastUpdate = 0;
+  unsigned long long lastUpdate = 0; // EPOCH.
   bool isValid = true;
   // bool initialized = false;
   String errorString = "";
 };
 
+enum class ApiMode
+{
+  Unknown,
+  Demo,
+  Sandbox,
+  Live
+};
+
 struct Api
 {
+  ApiMode mode;
   String provider;
   String key;
-  int maxRequestsPerMinute;
+  int maxRequestsPerDay;
+  String sandboxKey;
+  int sandboxMaxRequestsPerDay;
 };
 struct Display
 {
@@ -107,6 +118,7 @@ enum class ErrorIDs
 {
   SdFailed,
   ParametersFailed,
+  UnknownApi,
   InvalidApiKey
 };
 

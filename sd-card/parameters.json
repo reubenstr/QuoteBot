@@ -2,26 +2,39 @@
   "wifiCredentials": [
     {
       "ssid": "RedSky",
-      "password": "happyredcat"
+      "password": "YOUR_WIFI_PASSWORD_HERE"
     },
     {
       "ssid": "Hermes",
-      "password": "Mlx5ykch"
+      "password": "YOUR_WIFI_PASSWORD_HERE"
     }
   ],
   "symbols": [
     "AG",
+    "ASM",
     "AXU",
-    "SAND",
     "FFMGF",
     "FURY",
-    "ASM",
-    "AS2M"
+    "GDX",
+    "GDXJ",
+    "GOAU",
+    "KNTNF",
+    "MUX",
+    "NEM",
+    "PSLV",
+    "SAND",
+    "SILJ",
+    "SILV",
+    "SSRM",
+    "TRQ"
   ],
   "api": {
-    "apiProvider": "IEXCLOUD",
-    "apiKey": "YOUR_API_KEY_HERE",
-    "apiMaxRequestsPerMinute": 2
+	"mode": "SANDBOX",
+    "provider": "IEXCLOUD",
+    "key": "YOUR_API_KEY_HERE",
+    "maxRequestsPerDay": 1500,
+    "sandboxKey": "YOUR_SANDBOX_API_KEY_HERE",
+    "sandboxMaxRequestsPerDay": 86400   
   },
   "market": {
     "fetchPreMarketData": false,
@@ -31,12 +44,20 @@
     "nextSymbolDelay": 3,
     "brightnessMax": 255,
     "brightnessMin": 64,
-    "dimStartHour": 2000,
-    "dimEndHour": 800
+    "dimStartTime": "20:00",
+    "dimEndTime": "08:00"
   },
   "matrix": {
-    "marketHoursPattern": "TOP16",
-    "afterHoursPattern": "RAINBOW"
+    "holidayPattern": "RAINBOW",
+    "weekendPattern": "RANDOMREDGREEN",
+    "preMarketPattern": "TOP16",
+    "marketPattern": "TOP16",
+    "afterMarketPattern": "TOP16",
+    "closedPattern": "RAINBOW",
+    "brightnessMax": 255,
+    "brightnessMin": 64,
+    "dimStartTime": "21:00",
+    "dimEndTime": "08:00"
   },
   "system": {
     "timeZone": "EST"
