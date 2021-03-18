@@ -565,6 +565,7 @@ bool GetSymbolDataFromApiIEXCLOUD(SymbolData *symbolData)
     return false;
   }
 
+   symbolData->currentPrice = doc["latestPrice"].as<float>();
   symbolData->companyName = doc["companyName"].as<String>();
   symbolData->openPrice = doc["previousClose"].as<float>();
   symbolData->change = doc["change"].as<float>();
@@ -574,6 +575,10 @@ bool GetSymbolDataFromApiIEXCLOUD(SymbolData *symbolData)
   symbolData->week52Low = doc["week52Low"].as<float>();
   symbolData->latestUpdate = doc["latestUpdate"].as<long long>() / 1000; // convert milliseconds to seconds
 
+  
+
+
+ /*
   // OTC stocks have different price locations. (?)
   if (doc["iexRealtimePrice"].is<float>())
   {
@@ -583,6 +588,7 @@ bool GetSymbolDataFromApiIEXCLOUD(SymbolData *symbolData)
   {
     symbolData->currentPrice = doc["extendedPrice"].as<float>();
   }
+  */
 
   if (doc["peRatio"].is<float>())
   {
@@ -666,7 +672,7 @@ void GetSymbolData(void *)
       {
         if (parameters.symbolData[i].isValid)
         {
-          if (parameters.symbolData[i].latestUpdate < parameters.symbolData[selectedIndex].latestUpdate)
+          if (parameters.symbolData[i].lastApiCall < parameters.symbolData[selectedIndex].lastApiCall)
           {
             selectedIndex = i;
           }
@@ -678,7 +684,7 @@ void GetSymbolData(void *)
         if ((marketState == MarketState::PreHours && parameters.market.fetchPreMarketData) ||
             (marketState == MarketState::MarketHours) ||
             (marketState == MarketState::AfterHours && parameters.market.fetchAfterMarketData) ||
-            parameters.symbolData[selectedIndex].latestUpdate == 0)
+            parameters.symbolData[selectedIndex].lastApiCall == 0)
         {
 
           Serial.printf("API: Requesting data for symbol: %s\n", parameters.symbolData[selectedIndex].symbol.c_str());
@@ -804,13 +810,23 @@ bool GetTime()
   if (millis() - startGetTime > 250)
   {
     startGetTime = millis();
+  
 
+  
+
+   
+ 
     if (!getLocalTime(&currentTimeInfo))
     {
       Serial.println("TIME: Failed to obtain time");
+      status.time = false;
       return false;
     }
+
+    status.time = true;
+
     time(&currentEpoch);
+    
 
     static int previousMinute = ~currentTimeInfo.tm_min;
     if (previousMinute != currentTimeInfo.tm_min)
