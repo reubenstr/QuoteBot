@@ -49,10 +49,10 @@
   },
   "matrix": {
     "holidayPattern": "RAINBOW",
-    "weekendPattern": "RANDOMREDGREEN",
-    "preMarketPattern": "TOP16",
+    "weekendPattern": "RAINBOW",
+    "preMarketPattern": "RANDOMREDGREEN",
     "marketPattern": "TOP16",
-    "afterMarketPattern": "TOP16",
+    "afterMarketPattern": "RANDOMREDGREEN",
     "closedPattern": "RAINBOW",
     "brightnessMax": 255,
     "brightnessMin": 64,

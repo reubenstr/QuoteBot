@@ -9,13 +9,16 @@
     ESP32 (ESP32 DevKitV1)
   
   TFT:
-    320*240 touch TFT ILI9488 (Brand example: HiLetGo) with SD card slot.
+    2.8" 320*240 touch TFT ILI9488 (Brand example: HiLetGo) with SD card slot.
   
   NeoPixels:
     4x4 WS2812b LED matrix.
 
   TODO: 
     Check for market holiday.  
+    update market state on display upon market state change
+    Apply timezone offset to local time.
+    Add a actual limit to api calls per 24 hours.
 
   History:
 
@@ -75,32 +78,37 @@ bool isMarketHoliday = false;
 
 void Error(ErrorIDs errorId)
 {
+  const int yLine1 = 20;
+  const int yLine2 = 90;
+  const int yLine3 = 130;
+  const int yLine4 = 170;
+
   tft.fillScreen(TFT_BLACK);
   tft.setTextSize(4);
   tft.setTextDatum(TL_DATUM);
   tft.setTextColor(TFT_RED, TFT_BLACK);
-  tft.drawString("ERROR!", 30, 20);
+  tft.drawString("ERROR!", 30, yLine1);
 
   if (errorId == ErrorIDs::SdFailed)
   {
-    tft.drawString("SD Card", 30, 90);
-    tft.drawString("not found.", 30, 130);
+    tft.drawString("SD Card", 30, yLine2);
+    tft.drawString("not found.", 30, yLine3);
   }
   else if (errorId == ErrorIDs::ParametersFailed)
   {
-    tft.drawString("SD Card", 30, 90);
-    tft.drawString("parameters", 30, 130);
-    tft.drawString("are invalid.", 30, 170);
+    tft.drawString("SD Card", 30, yLine2);
+    tft.drawString("parameters", 30, yLine3);
+    tft.drawString("are invalid.", 30, yLine4);
   }
   else if (errorId == ErrorIDs::UnknownApi)
   {
-    tft.drawString("Uknown", 30, 90);
-    tft.drawString("API provider.", 30, 130);
+    tft.drawString("Uknown", 30, yLine2);
+    tft.drawString("API provider.", 30, yLine3);
   }
   else if (errorId == ErrorIDs::InvalidApiKey)
   {
-    tft.drawString("Invalid", 30, 90);
-    tft.drawString("API key.", 30, 130);
+    tft.drawString("Invalid", 30, yLine2);
+    tft.drawString("API key.", 30, yLine3);
   }
 
   while (1)
@@ -570,18 +578,6 @@ bool GetSymbolDataFromApiIEXCLOUD(SymbolData *symbolData)
   symbolData->week52Low = doc["week52Low"].as<float>();
   symbolData->latestUpdate = doc["latestUpdate"].as<long long>() / 1000; // convert milliseconds to seconds
 
-  /*
-  // OTC stocks have different price locations. (?)
-  if (doc["iexRealtimePrice"].is<float>())
-  {
-    symbolData->currentPrice = doc["iexRealtimePrice"].as<float>();
-  }
-  else
-  {
-    symbolData->currentPrice = doc["extendedPrice"].as<float>();
-  }
-  */
-
   if (doc["peRatio"].is<float>())
   {
     symbolData->peRatio = doc["peRatio"].as<float>();
@@ -606,11 +602,11 @@ void GetMarketState(tm currentTime, MarketState *ms)
   }
   else
   {
-    if (isTimeBetweenTimes(currentTimeInfo.tm_hour, currentTimeInfo.tm_min, 4, 0, 9, 29)) // Pre Market hours.
+    if (isTimeBetweenTimes(currentTimeInfo.tm_hour, currentTimeInfo.tm_min, 4, 0, 9, 30)) // Pre Market hours.
     {
       *ms = MarketState::PreHours;
     }
-    else if (isTimeBetweenTimes(currentTimeInfo.tm_hour, currentTimeInfo.tm_min, 9, 30, 15, 59)) // Market hours.
+    else if (isTimeBetweenTimes(currentTimeInfo.tm_hour, currentTimeInfo.tm_min, 9, 30, 16, 00)) // Market hours.
     {
       *ms = MarketState::MarketHours;
     }
@@ -748,6 +744,13 @@ void CheckTouchScreen()
 
 bool ConnectWifi()
 {
+  const int yLine1 = 50;
+  const int yLine2 = 70;
+  const int yLine3 = 90;
+  const int yLine4 = 110;
+  const int yLine5 = 140;
+  const int yLine6 = 160;
+
   char buf[128];
   int wifiCredentialsIndex = 0;
 
@@ -757,16 +760,17 @@ bool ConnectWifi()
     tft.setTextSize(2);
     tft.setTextColor(TFT_GREEN);
     tft.setTextDatum(TL_DATUM);
-    tft.drawString("Connecting to WiFi\n", 10, 50);
-    sprintf(buf, "SSID: %s\n", parameters.wifiCredentials[wifiCredentialsIndex].ssid.c_str());
-    tft.drawString(buf, 10, 70);
-    sprintf(buf, "Password: %s\n", parameters.wifiCredentials[wifiCredentialsIndex].password.c_str());
-    tft.drawString(buf, 10, 90);
+    tft.drawString("Connecting to WiFi", 10, yLine1);
+    sprintf(buf, "SSID: %s", parameters.wifiCredentials[wifiCredentialsIndex].ssid.c_str());
+    tft.drawString(buf, 10, yLine2);
+    sprintf(buf, "PWD: %s", parameters.wifiCredentials[wifiCredentialsIndex].password.c_str());
+    tft.drawString(buf, 10, yLine3);
+
     Serial.printf("\nWIFI: Connecting to SSID: %s, with password: %s\n", parameters.wifiCredentials[wifiCredentialsIndex].ssid.c_str(), parameters.wifiCredentials[wifiCredentialsIndex].password.c_str());
 
     WiFi.begin(parameters.wifiCredentials[wifiCredentialsIndex].ssid.c_str(), parameters.wifiCredentials[wifiCredentialsIndex].password.c_str());
 
-    tft.setCursor(10, 110);
+    tft.setCursor(10, yLine4);
     int count = 0;
     while (count++ < 10)
     {
@@ -776,12 +780,12 @@ bool ConnectWifi()
 
       if (WiFi.status() == WL_CONNECTED)
       {
-        tft.drawString("Connected!\n", 10, 140);
-        sprintf(buf, "IP: %s\n", WiFi.localIP().toString().c_str());
-        tft.drawString(buf, 10, 160);
+        tft.drawString("Connected!", 10, yLine5);
+        sprintf(buf, "IP: %s", WiFi.localIP().toString().c_str());
+        tft.drawString(buf, 10, yLine6);
         Serial.println("");
         Serial.printf("WIFI: WiFi connected to %s, device IP: %s\n", parameters.wifiCredentials[wifiCredentialsIndex].ssid.c_str(), WiFi.localIP().toString().c_str());
-        delay(1000);
+        delay(2000);
         DisplayBlank();
         return true;
       }

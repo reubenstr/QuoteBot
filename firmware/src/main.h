@@ -13,7 +13,7 @@ struct SymbolData
   float week52High = 0;
   float week52Low = 0;
   unsigned long long latestUpdate = 0; // EPOCH in seconds.
-  unsigned long long lastApiCall = 0; // EPOCH in seconds.
+  unsigned long long lastApiCall = 0;  // EPOCH in seconds.
   bool isValid = true;
   String errorString = "";
 };
