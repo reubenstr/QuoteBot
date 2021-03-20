@@ -39,11 +39,11 @@
 #include <HTTPClient.h>
 #include "time.h"
 #include <Adafruit_NeoPixel.h>
-#include "utilities.h"      // Local.
-#include "tftMethods.h"     // Local.
-#include "main.h"           // Local.
-#include "NeoPixelHelper.h" //Local.
-#include "timeRange.h"
+#include "utilities.h"       // Local.
+#include "tftMethods.h"      // Local.
+#include "main.h"            // Local.
+#include "neoPixelMethods.h" // Local.
+#include "timeRange.h"       // Local.
 
 #define ARDUINOJSON_USE_LONG_LONG 1
 #include <ArduinoJson.h>
@@ -52,6 +52,22 @@
 #define PIN_LCD_BACKLIGHT_PWM 21
 #define PIN_SD_CHIP_SELECT 15
 #define PIN_LED_NEOPIXEL_MATRIX 27
+
+/*
+// HILETGO 2.4" w/touch.
+// Defined in User_Setup.h in the TFT_eSPI library.
+#define ILI9488_DRIVER 
+#define TFT_WIDTH  320
+#define TFT_HEIGHT 240
+#define TFT_CS 5
+#define TFT_DC 2
+#define TFT_SCLK 18
+#define TFT_MOSI 23
+#define TFT_MISO 19
+#define TFT_RST 4
+#define TOUCH_CS 22    
+#define TFT_INVERSION_ON
+ */
 
 #define PWM_CHANNEL_LCD_BACKLIGHT 0
 
@@ -343,7 +359,7 @@ void ProcessIndicators(bool forceUpdate = false)
     DisplayIndicator("API", 130, y, status.api ? TFT_GREEN : TFT_RED);
     DisplayIndicator("L", 165, y, status.symbolLocked ? TFT_BLUE : 0x0001);
     DisplayIndicator("R", 190, y, status.requestInProgess ? TFT_BLUE : 0x0001);
-    DisplayIndicator(String(buf), 260, y, status.time ? TFT_GREEN : TFT_RED);
+    DisplayIndicator(String(buf), 275, y, status.time ? TFT_GREEN : TFT_RED);
   }
 }
 
@@ -761,7 +777,6 @@ unsigned long CalcMillisecondsBetweenApiFetches()
 
   if (parameters.api.mode == ApiMode::Live)
   {
-
     float apiSeconds = 0;
     if (parameters.market.fetchPreMarketData)
       apiSeconds += preMarketTimeRange.GetTotalSeconds();
@@ -770,20 +785,19 @@ unsigned long CalcMillisecondsBetweenApiFetches()
     if (parameters.market.fetchAfterMarketData)
       apiSeconds += afterMarketTimeRange.GetTotalSeconds();
     delay = (apiSeconds / parameters.api.maxRequestsPerDay) * 1000;
-
-    Serial.println(parameters.market.fetchPreMarketData);
-    Serial.println(parameters.market.fetchMarketData);
-    Serial.println(parameters.market.fetchAfterMarketData);
-    Serial.println(apiSeconds);
   }
   else if (parameters.api.mode == ApiMode::Sandbox)
   {
     float apiSeconds = 24 * 60 * 60;
-    delay = (apiSeconds / parameters.api.maxRequestsPerDay) * 1000;
+    delay = (apiSeconds / parameters.api.sandboxMaxRequestsPerDay) * 1000;
   }
   else if (parameters.api.mode == ApiMode::Demo)
   {
     delay = 1000;
+  }
+  else
+  {
+    delay = 60000;
   }
 
   return delay;
@@ -960,7 +974,7 @@ void setup()
 
   Serial.printf("API: mode: %s\n", apiModeText[int(parameters.api.mode)]);
   Serial.printf("API: max api (live) fetches per day: %u\n", parameters.api.maxRequestsPerDay);
-  Serial.printf("API: milliseconds per request: %Lu\n", millisecondsBetweenApiCalls);
+  Serial.printf("API: milliseconds per request: %lu\n", millisecondsBetweenApiCalls);
 }
 
 void loop()
@@ -983,5 +997,5 @@ void loop()
 
   ProcessSymbolIncrement();
 
-  ProcessDisplayUpdate(); 
+  ProcessDisplayUpdate();
 }

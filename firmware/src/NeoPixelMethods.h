@@ -1,3 +1,10 @@
+/*
+  neoPixelMethods.h
+
+  Helper methods for the neopixel library.
+
+*/
+
 #include <Adafruit_NeoPixel.h>
 
 // Matrix colors (NeoPixels)
