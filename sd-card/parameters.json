@@ -1,4 +1,4 @@
-{
+  {
   "wifiCredentials": [
     {
       "ssid": "RedSky",
@@ -29,23 +29,23 @@
     "TRQ"
   ],
   "api": {
-	"mode": "SANDBOX",
+    "mode": "LIVE",
     "provider": "IEXCLOUD",
     "key": "YOUR_API_KEY_HERE",
     "maxRequestsPerDay": 1500,
-    "sandboxKey": "YOUR_SANDBOX_API_KEY_HERE",
-    "sandboxMaxRequestsPerDay": 86400   
+    "sandboxKey": "YOUR_API_KEY_HERE",
+    "sandboxMaxRequestsPerDay": 86400
   },
   "market": {
     "fetchPreMarketData": false,
+	"fetchMarketData": true,
     "fetchAfterMarketData": false
   },
   "display": {
     "nextSymbolDelay": 3,
     "brightnessMax": 255,
-    "brightnessMin": 64,
-    "dimStartTime": "20:00",
-    "dimEndTime": "08:00"
+    "brightnessMin": 32,
+    "maxBrightnessHours": "08:00-20:00"
   },
   "matrix": {
     "holidayPattern": "RAINBOW",
@@ -54,10 +54,9 @@
     "marketPattern": "TOP16",
     "afterMarketPattern": "RANDOMREDGREEN",
     "closedPattern": "RAINBOW",
-    "brightnessMax": 255,
-    "brightnessMin": 64,
-    "dimStartTime": "21:00",
-    "dimEndTime": "08:00"
+    "brightnessMax": 196,
+    "brightnessMin": 32,
+    "maxBrightnessHours": "08:00-20:00"
   },
   "system": {
     "timeZone": "EST"
