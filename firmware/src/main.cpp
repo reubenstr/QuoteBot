@@ -14,6 +14,9 @@
   NeoPixels:
     4x4 WS2812b LED matrix.
 
+  Supported API(s):
+    https://iexcloud.io  
+
   TODO: 
     Check for market holiday.  
     update market state on display upon market state change
@@ -48,58 +51,26 @@
 #define ARDUINOJSON_USE_LONG_LONG 1
 #include <ArduinoJson.h>
 
-// Pins.
+// TFT parameters are contained in platformio.ini
 #define PIN_LCD_BACKLIGHT_PWM 21
 #define PIN_SD_CHIP_SELECT 15
 #define PIN_LED_NEOPIXEL_MATRIX 27
 
-/*
-// HILETGO 2.4" w/touch.
-// Defined in User_Setup.h in the TFT_eSPI library.
-#define ILI9488_DRIVER 
-#define TFT_WIDTH  320
-#define TFT_HEIGHT 240
-#define TFT_CS 5
-#define TFT_DC 2
-#define TFT_SCLK 18
-#define TFT_MOSI 23
-#define TFT_MISO 19
-#define TFT_RST 4
-#define TOUCH_CS 22    
-#define TFT_INVERSION_ON
- */
-
 #define PWM_CHANNEL_LCD_BACKLIGHT 0
 
-// GLCD.
+//
 TFT_eSPI tft = TFT_eSPI();
 Adafruit_NeoPixel matrix = Adafruit_NeoPixel(16, PIN_LED_NEOPIXEL_MATRIX, NEO_GRB + NEO_KHZ800);
 
 // Time.
-struct tm currentTimeInfo;
-time_t currentEpoch;
-const char *ntpServer = "pool.ntp.org";
-const long gmtOffset_sec = -5 * 60 * 60;
-const int daylightOffset_sec = 3600;
-
-const unsigned long wifiTimeoutUntilNewScan = 30000; // milliseconds.
-const char *parametersFilePath = "/parameters.json";
-unsigned int symbolSelect = 0;
-const float peRatioNA = 0.0;
-const String errorUnknownSymbol = "Uknown symbol";
-unsigned long millisecondsBetweenApiCalls;
+System sys;
 Parameters parameters;
 Status status;
 MarketState marketState;
 
+const char *parametersFilePath = "/parameters.json";
+const float peRatioNA = 0.0;
 bool isMarketHoliday = false;
-
-TimeRange preMarketTimeRange(4, 0, 9, 29);
-TimeRange marketTimeRange(9, 30, 15, 59);
-TimeRange afterMarketTimeRange(16, 0, 21, 59);
-
-TimeRange displayMaxBrightnessTimeRange;
-TimeRange matrixMaxBrightnessTimeRange;
 
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
@@ -150,8 +121,8 @@ auto sortByAbsFloat = [](float i, float j) {
 void ProcessMatrix()
 {
   // Check brightness.
-  static int previousBrightness = ledcRead(0);
-  int brightness = matrixMaxBrightnessTimeRange.isTimeBetweenRange(currentTimeInfo.tm_hour, currentTimeInfo.tm_min) ? parameters.matrix.brightnessMax : parameters.matrix.brightnessMin;
+  static int previousBrightness = matrix.getBrightness();
+  int brightness = sys.time.matrixMaxBrightnessTimeRange.isTimeBetweenRange(sys.time.currentTimeInfo.tm_hour, sys.time.currentTimeInfo.tm_min) ? parameters.matrix.brightnessMax : parameters.matrix.brightnessMin;
   if (previousBrightness != brightness)
   {
     Serial.printf("DISPLAY: matrix brightness changed from %u to %u.\n", previousBrightness, brightness);
@@ -300,7 +271,7 @@ bool GetParametersFromSDCard()
   parameters.display.nextSymbolDelay = doc["display"]["nextSymbolDelay"].as<int>();
   parameters.display.brightnessMax = doc["display"]["brightnessMax"].as<int>();
   parameters.display.brightnessMin = doc["display"]["brightnessMin"].as<int>();
-  displayMaxBrightnessTimeRange.SetTimeRangeFromString(doc["display"]["maxBrightnessHours"].as<String>());
+  sys.time.displayMaxBrightnessTimeRange.SetTimeRangeFromString(doc["display"]["maxBrightnessHours"].as<String>());
 
   parameters.matrix.holidayPattern = doc["matrix"]["holidayPattern"].as<String>();
   parameters.matrix.weekendPattern = doc["matrix"]["weekendPattern"].as<String>();
@@ -310,9 +281,9 @@ bool GetParametersFromSDCard()
   parameters.matrix.closedPattern = doc["matrix"]["closedPattern"].as<String>();
   parameters.matrix.brightnessMax = doc["matrix"]["brightnessMax"].as<int>();
   parameters.matrix.brightnessMin = doc["matrix"]["brightnessMin"].as<int>();
-  matrixMaxBrightnessTimeRange.SetTimeRangeFromString(doc["matrix"]["maxBrightnessHours"].as<String>());
+  sys.time.matrixMaxBrightnessTimeRange.SetTimeRangeFromString(doc["matrix"]["maxBrightnessHours"].as<String>());
 
-  parameters.system.timeZone = doc["system"]["timeZone"].as<String>();
+  sys.time.timeZone = doc["system"]["timeZone"].as<String>();
 
   // Conform parameters into acceptable ranges.
 
@@ -352,7 +323,7 @@ void ProcessIndicators(bool forceUpdate = false)
   {
     previousStatus = status;
 
-    sprintf(buf, "%02u:%02u", currentTimeInfo.tm_hour, currentTimeInfo.tm_min);
+    sprintf(buf, "%02u:%02u", sys.time.currentTimeInfo.tm_hour, sys.time.currentTimeInfo.tm_min);
 
     DisplayIndicator("SD", 25, y, status.sd ? TFT_GREEN : TFT_RED);
     DisplayIndicator("WIFI", 75, y, status.wifi ? TFT_GREEN : TFT_RED);
@@ -530,7 +501,7 @@ bool GetSymbolDataFromApiIEXCLOUD(SymbolData *symbolData)
     return false;
   }
 
-  symbolData->lastApiCall = currentEpoch;
+  symbolData->lastApiCall = sys.time.currentEpoch;
 
   Serial.print("API: Connecting to ");
   Serial.println(host);
@@ -623,7 +594,7 @@ void GetSymbolData(void *)
 {
   static unsigned long start = millis();
 
-  if (millis() - start > millisecondsBetweenApiCalls)
+  if (millis() - start > sys.millisecondsBetweenApiCalls)
   {
     start = millis();
 
@@ -689,21 +660,21 @@ void ProcessTouchScreen()
 
       if (x < tft.width() / 3)
       {
-        symbolSelect++;
-        if (symbolSelect > parameters.symbolData.size() - 1)
+        sys.symbolSelect++;
+        if (sys.symbolSelect > parameters.symbolData.size() - 1)
         {
-          symbolSelect = 0;
+          sys.symbolSelect = 0;
         }
       }
       else if (x > (tft.width() / 3) * 2)
       {
-        if (symbolSelect != 0)
+        if (sys.symbolSelect != 0)
         {
-          symbolSelect--;
+          sys.symbolSelect--;
         }
         else
         {
-          symbolSelect = parameters.symbolData.size() - 1;
+          sys.symbolSelect = parameters.symbolData.size() - 1;
         }
       }
       else
@@ -771,7 +742,7 @@ bool ConnectWifi()
   }
 }
 
-unsigned long CalcMillisecondsBetweenApiFetches()
+void CalcMillisecondsBetweenApiFetches()
 {
   unsigned long delay = 0;
 
@@ -779,11 +750,11 @@ unsigned long CalcMillisecondsBetweenApiFetches()
   {
     float apiSeconds = 0;
     if (parameters.market.fetchPreMarketData)
-      apiSeconds += preMarketTimeRange.GetTotalSeconds();
+      apiSeconds += sys.time.preMarketTimeRange.GetTotalSeconds();
     if (parameters.market.fetchMarketData)
-      apiSeconds += marketTimeRange.GetTotalSeconds();
+      apiSeconds += sys.time.marketTimeRange.GetTotalSeconds();
     if (parameters.market.fetchAfterMarketData)
-      apiSeconds += afterMarketTimeRange.GetTotalSeconds();
+      apiSeconds += sys.time.afterMarketTimeRange.GetTotalSeconds();
     delay = (apiSeconds / parameters.api.maxRequestsPerDay) * 1000;
   }
   else if (parameters.api.mode == ApiMode::Sandbox)
@@ -800,7 +771,7 @@ unsigned long CalcMillisecondsBetweenApiFetches()
     delay = 60000;
   }
 
-  return delay;
+  sys.millisecondsBetweenApiCalls = delay;
 }
 
 bool ProcessTime()
@@ -811,7 +782,7 @@ bool ProcessTime()
   {
     startGetTime = millis();
 
-    if (!getLocalTime(&currentTimeInfo))
+    if (!getLocalTime(&sys.time.currentTimeInfo))
     {
       Serial.println("TIME: Failed to obtain time");
       status.time = false;
@@ -820,12 +791,12 @@ bool ProcessTime()
 
     status.time = true;
 
-    time(&currentEpoch);
+    time(&sys.time.currentEpoch); // Fetch current time as epoch
 
-    static int previousMinute = ~currentTimeInfo.tm_min;
-    if (previousMinute != currentTimeInfo.tm_min)
+    static int previousMinute = ~sys.time.currentTimeInfo.tm_min;
+    if (previousMinute != sys.time.currentTimeInfo.tm_min)
     {
-      previousMinute = currentTimeInfo.tm_min;
+      previousMinute = sys.time.currentTimeInfo.tm_min;
       ProcessIndicators(true);
     }
   }
@@ -835,18 +806,18 @@ bool ProcessTime()
 
 void ProcessMarketState()
 {
-  marketState = isMarketHoliday                                                                                      ? MarketState::Holiday
-                : currentTimeInfo.tm_wday == int(DayIds::Sunday) || currentTimeInfo.tm_wday == int(DayIds::Saturday) ? MarketState::Weekend
-                : preMarketTimeRange.isTimeBetweenRange(currentTimeInfo.tm_hour, currentTimeInfo.tm_min)             ? MarketState::PreHours
-                : marketTimeRange.isTimeBetweenRange(currentTimeInfo.tm_hour, currentTimeInfo.tm_min)                ? MarketState::MarketHours
-                : afterMarketTimeRange.isTimeBetweenRange(currentTimeInfo.tm_hour, currentTimeInfo.tm_min)           ? MarketState::AfterHours
-                                                                                                                     : MarketState::Closed;
+  marketState = isMarketHoliday                                                                                                        ? MarketState::Holiday
+                : sys.time.currentTimeInfo.tm_wday == int(DayIds::Sunday) || sys.time.currentTimeInfo.tm_wday == int(DayIds::Saturday) ? MarketState::Weekend
+                : sys.time.preMarketTimeRange.isTimeBetweenRange(sys.time.currentTimeInfo.tm_hour, sys.time.currentTimeInfo.tm_min)    ? MarketState::PreHours
+                : sys.time.marketTimeRange.isTimeBetweenRange(sys.time.currentTimeInfo.tm_hour, sys.time.currentTimeInfo.tm_min)       ? MarketState::MarketHours
+                : sys.time.afterMarketTimeRange.isTimeBetweenRange(sys.time.currentTimeInfo.tm_hour, sys.time.currentTimeInfo.tm_min)  ? MarketState::AfterHours
+                                                                                                                                       : MarketState::Closed;
 }
 
 void ProcessDisplayBrightness()
 {
   static int previousBrightness = ledcRead(0);
-  int brightness = displayMaxBrightnessTimeRange.isTimeBetweenRange(currentTimeInfo.tm_hour, currentTimeInfo.tm_min) ? parameters.display.brightnessMax : parameters.display.brightnessMin;
+  int brightness = sys.time.displayMaxBrightnessTimeRange.isTimeBetweenRange(sys.time.currentTimeInfo.tm_hour, sys.time.currentTimeInfo.tm_min) ? parameters.display.brightnessMax : parameters.display.brightnessMin;
 
   if (previousBrightness != brightness)
   {
@@ -861,7 +832,7 @@ void ProcessWifiCheck()
   // Check for WiFi connection, attempt reconnect after timeout.
   status.wifi = (WiFi.status() == WL_CONNECTED);
   static unsigned long startStatus = millis();
-  if (millis() - startStatus > wifiTimeoutUntilNewScan)
+  if (millis() - startStatus > sys.wifiTimeoutUntilNewScan)
   {
     ConnectWifi();
   }
@@ -899,9 +870,9 @@ void ProcessSymbolIncrement()
     startSymbolSelect = millis();
     if (!status.symbolLocked)
     {
-      if (++symbolSelect > parameters.symbolData.size() - 1)
+      if (++sys.symbolSelect > parameters.symbolData.size() - 1)
       {
-        symbolSelect = 0;
+        sys.symbolSelect = 0;
       }
     }
   }
@@ -919,10 +890,10 @@ void ProcessDisplayUpdate()
   previousRequestInProgess = status.requestInProgess;
 
   // Update display with symbol data.
-  if (previousSymbolSelect != symbolSelect)
+  if (previousSymbolSelect != sys.symbolSelect)
   {
-    previousSymbolSelect = symbolSelect;
-    DisplayStockData(parameters.symbolData.at(symbolSelect));
+    previousSymbolSelect = sys.symbolSelect;
+    DisplayStockData(parameters.symbolData.at(sys.symbolSelect));
   }
 }
 
@@ -968,13 +939,17 @@ void setup()
 
   ConnectWifi();
 
-  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+  configTime(sys.time.gmtOffset_sec, sys.time.daylightOffset_sec, sys.time.ntpServer);
 
-  millisecondsBetweenApiCalls = CalcMillisecondsBetweenApiFetches();
+  sys.time.preMarketTimeRange = TimeRange(4, 0, 9, 29);
+  sys.time.marketTimeRange = TimeRange(9, 30, 15, 59);
+  sys.time.afterMarketTimeRange = TimeRange(16, 0, 21, 59);
+
+  CalcMillisecondsBetweenApiFetches();
 
   Serial.printf("API: mode: %s\n", apiModeText[int(parameters.api.mode)]);
   Serial.printf("API: max api (live) fetches per day: %u\n", parameters.api.maxRequestsPerDay);
-  Serial.printf("API: milliseconds per request: %lu\n", millisecondsBetweenApiCalls);
+  Serial.printf("API: milliseconds per request: %lu\n", sys.millisecondsBetweenApiCalls);
 }
 
 void loop()

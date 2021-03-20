@@ -1,17 +1,40 @@
 #include <Arduino.h>
 #include <vector>
+#include "timeRange.h"
 
 enum class DayIds
 {
-    Sunday,
-    Monday,
-    Tuesday,
-    Wednesday,
-    Thursday,
-    Friday,
-    Saturday
+  Sunday,
+  Monday,
+  Tuesday,
+  Wednesday,
+  Thursday,
+  Friday,
+  Saturday
 };
 
+struct Time
+{
+  struct tm currentTimeInfo;
+  time_t currentEpoch;
+  const char *ntpServer = "pool.ntp.org";
+  const long gmtOffset_sec = -5 * 60 * 60;
+  const int daylightOffset_sec = 3600;
+  String timeZone;
+  TimeRange preMarketTimeRange;
+  TimeRange marketTimeRange;
+  TimeRange afterMarketTimeRange;
+  TimeRange displayMaxBrightnessTimeRange;
+  TimeRange matrixMaxBrightnessTimeRange;
+};
+
+struct System
+{
+  Time time;
+  unsigned int symbolSelect = 0;
+  unsigned long millisecondsBetweenApiCalls;
+  const unsigned long wifiTimeoutUntilNewScan = 30000; // milliseconds.
+};
 
 struct SymbolData
 {
@@ -74,11 +97,6 @@ struct Matrix
   int dimStartMin;
   int dimEndHour;
   int dimEndMin;
-};
-
-struct System
-{
-  String timeZone;
 };
 
 struct WifiCredentials
