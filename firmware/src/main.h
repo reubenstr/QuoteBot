@@ -71,7 +71,10 @@ struct Api
   int maxRequestsPerDay;
   String sandboxKey;
   int sandboxMaxRequestsPerDay;
+
+  
 };
+
 struct Display
 {
   int nextSymbolDelay;

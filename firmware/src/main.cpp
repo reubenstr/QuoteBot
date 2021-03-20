@@ -19,15 +19,17 @@
 
   TODO: 
     Check for market holiday.  
-    update market state on display upon market state change
+    update market state on display upon market state change.
     Apply timezone offset to local time.
     Add a actual limit to api calls per 24 hours.
+    Add another API.
 
   History:
 
   VERSION   AUTHOR      DATE        NOTES
   =============================================================================
   0.0.0     ReubenStr   2021/13/3   Development phase.
+  0.1.0     ReubenStr   2021/20/3   Pre-release, major functionality complete.
 
 */
 
@@ -42,11 +44,12 @@
 #include <HTTPClient.h>
 #include "time.h"
 #include <Adafruit_NeoPixel.h>
-#include "utilities.h"       // Local.
-#include "tftMethods.h"      // Local.
-#include "main.h"            // Local.
-#include "neoPixelMethods.h" // Local.
-#include "timeRange.h"       // Local.
+#include "utilities.h"        // Local.
+#include "tftMethods.h"       // Local.
+#include "main.h"             // Local.
+#include "neoPixelMethods.h"  // Local.
+#include "timeRange.h"        // Local.
+#include "api.h"              // Local.
 
 #define ARDUINOJSON_USE_LONG_LONG 1
 #include <ArduinoJson.h>
