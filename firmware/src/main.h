@@ -1,6 +1,18 @@
 #include <Arduino.h>
 #include <vector>
 
+enum class DayIds
+{
+    Sunday,
+    Monday,
+    Tuesday,
+    Wednesday,
+    Thursday,
+    Friday,
+    Saturday
+};
+
+
 struct SymbolData
 {
   String symbol = "";
@@ -78,6 +90,7 @@ struct WifiCredentials
 struct Market
 {
   bool fetchPreMarketData;
+  bool fetchMarketData;
   bool fetchAfterMarketData;
 };
 

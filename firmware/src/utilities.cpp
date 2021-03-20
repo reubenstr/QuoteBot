@@ -27,6 +27,7 @@ float mapFloat(float x, float in_min, float in_max, float out_min, float out_max
   return (delta * dividend + (divisor / 2)) / divisor + out_min;
 }
 
+/*
 // Return total seconds from hours and minutes;
 unsigned long hourMinToSeconds(int hour, int minute)
 {
@@ -58,6 +59,7 @@ bool getHourMin(String string, int *hour, int *min)
 
   return true;
 }
+*/
 
 // Convert matrix pixel order to start at the upper left and end at the lower right.
 int rotateMatrix(unsigned int i)
