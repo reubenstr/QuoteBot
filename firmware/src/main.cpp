@@ -18,8 +18,7 @@
     https://iexcloud.io  
 
   TODO: 
-    Check for market holiday.  
-    update market state on display upon market state change.
+    Check for market holiday.      
     Apply timezone offset to local time.
     Add a actual limit to api calls per 24 hours.
     Add another API.
@@ -44,12 +43,11 @@
 #include <HTTPClient.h>
 #include "time.h"
 #include <Adafruit_NeoPixel.h>
-#include "utilities.h"        // Local.
-#include "tftMethods.h"       // Local.
-#include "main.h"             // Local.
-#include "neoPixelMethods.h"  // Local.
-#include "timeRange.h"        // Local.
-#include "api.h"              // Local.
+#include "utilities.h"       // Local.
+#include "tftMethods.h"      // Local.
+#include "main.h"            // Local.
+#include "neoPixelMethods.h" // Local.
+#include "timeRange.h"       // Local.
 
 #define ARDUINOJSON_USE_LONG_LONG 1
 #include <ArduinoJson.h>
@@ -125,7 +123,10 @@ void ProcessMatrix()
 {
   // Check brightness.
   static int previousBrightness = matrix.getBrightness();
-  int brightness = sys.time.matrixMaxBrightnessTimeRange.isTimeBetweenRange(sys.time.currentTimeInfo.tm_hour, sys.time.currentTimeInfo.tm_min) ? parameters.matrix.brightnessMax : parameters.matrix.brightnessMin;
+  int brightness = sys.time.matrixMaxBrightnessTimeRange.isTimeBetweenRange(
+                       sys.time.currentTimeInfo.tm_hour, sys.time.currentTimeInfo.tm_min)
+                       ? parameters.matrix.brightnessMax
+                       : parameters.matrix.brightnessMin;
   if (previousBrightness != brightness)
   {
     Serial.printf("DISPLAY: matrix brightness changed from %u to %u.\n", previousBrightness, brightness);
@@ -450,12 +451,11 @@ void DisplayStockData(SymbolData symbolData)
 
     // Market state.
     tft.setTextPadding(tft.textWidth("Weekend"));
-    static MarketState previousMarketState = MarketState::Unknown;
+    static MarketState previousMarketState = MarketState::Unknown;    
     if (previousMarketState != marketState)
     {
       previousMarketState = marketState;
-      tft.drawString("", 150, 160);
-      tft.drawString("", 150, 182);
+      tft.fillRect(90, 158, 120, 44, TFT_BLACK);  
     }
     if (marketStateDesciptionBottom[int(marketState)][0] != 0)
     {
@@ -906,7 +906,7 @@ void setup()
   Serial.begin(115200);
   Serial.println(F("\nQuoteBot starting up..."));
 
-  matrix.setBrightness(127);
+  matrix.setBrightness(0);
   matrix.begin();
   matrix.show();
 
@@ -953,6 +953,7 @@ void setup()
   Serial.printf("API: mode: %s\n", apiModeText[int(parameters.api.mode)]);
   Serial.printf("API: max api (live) fetches per day: %u\n", parameters.api.maxRequestsPerDay);
   Serial.printf("API: milliseconds per request: %lu\n", sys.millisecondsBetweenApiCalls);
+
 }
 
 void loop()
