@@ -19,8 +19,7 @@
 
   TODO: 
     Check for market holiday.      
-    Apply timezone offset to local time.
-    Add a actual limit to api calls per 24 hours.
+    Apply timezone offset to local time.   
     Add another API.
 
   History:
@@ -414,7 +413,7 @@ void DisplayStockData(SymbolData symbolData)
     tft.drawString(buf, 90, 113);
 
     tft.setTextPadding(tft.textWidth("-2345.67"));
-    sprintf(buf, "%3.2f%%", symbolData.changePercent);
+    sprintf(buf, "%3.2f%%", symbolData.changePercent * 100);
     tft.drawString(buf, tft.height() - 90, 113);
     //////////////////////////////////////////////////////
 
