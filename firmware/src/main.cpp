@@ -897,6 +897,13 @@ void ProcessDisplayUpdate()
     previousSymbolSelect = sys.symbolSelect;
     DisplayStockData(parameters.symbolData.at(sys.symbolSelect));
   }
+
+  static MarketState previousMarketState = marketState;
+  if (previousMarketState != marketState)
+  {
+    previousMarketState = marketState;
+     DisplayStockData(parameters.symbolData.at(sys.symbolSelect));
+  }
 }
 
 void setup()
